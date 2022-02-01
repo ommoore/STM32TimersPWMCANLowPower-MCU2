@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;CAN_LoopBack/timer_PWM_LED.ioc&apos; to &apos;CAN_LoopBack.ioc&apos;" description="Rename resource &apos;timer_PWM_LED.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="timer_PWM_LED.ioc" name="CAN_LoopBack.ioc" stamp="1643159562736" updateReferences="true"/>
+</session>

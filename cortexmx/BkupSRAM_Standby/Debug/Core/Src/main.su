@@ -1,0 +1,6 @@
+main.c:21:6:printmsg	96	static
+main.c:33:5:main	32	static
+main.c:96:6:SystemClock_Config_HSE	96	static
+main.c:179:6:GPIO_Init	32	static
+main.c:191:6:UART2_Init	8	static
+main.c:208:6:Error_handler	4	static

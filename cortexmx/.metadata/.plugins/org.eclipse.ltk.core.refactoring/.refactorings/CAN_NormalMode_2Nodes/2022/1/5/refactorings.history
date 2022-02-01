@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;CAN_NormalMode_2Nodes/CAN_LoopBack_IT.ioc&apos; to &apos;CAN_NormalMode_2Nodes.ioc&apos;" description="Rename resource &apos;CAN_LoopBack_IT.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="CAN_LoopBack_IT.ioc" name="CAN_NormalMode_2Nodes.ioc" stamp="1643315740692" updateReferences="true"/>
+</session>

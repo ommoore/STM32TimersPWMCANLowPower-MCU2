@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;RTC_AlarmA/RTC_Date_Time.ioc&apos; to &apos;RTC_AlarmA.ioc&apos;" description="Rename resource &apos;RTC_Date_Time.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="RTC_Date_Time.ioc" name="RTC_AlarmA.ioc" stamp="1643661160821" updateReferences="true"/>
+</session>

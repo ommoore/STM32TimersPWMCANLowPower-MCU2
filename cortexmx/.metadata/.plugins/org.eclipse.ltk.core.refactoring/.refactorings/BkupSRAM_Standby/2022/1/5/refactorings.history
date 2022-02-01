@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;BkupSRAM_Standby/WFE_button.ioc&apos; to &apos;BkupSRAM_Standby.ioc&apos;" description="Rename resource &apos;WFE_button.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="WFE_button.ioc" name="BkupSRAM_Standby.ioc" stamp="1643418923327" updateReferences="true"/>
+</session>

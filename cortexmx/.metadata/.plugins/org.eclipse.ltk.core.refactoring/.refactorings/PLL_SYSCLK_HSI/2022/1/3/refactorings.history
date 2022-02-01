@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;PLL_SYSCLK/UART2_Example.ioc&apos; to &apos;PLL_SYSCLK.ioc&apos;" description="Rename resource &apos;UART2_Example.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="UART2_Example.ioc" name="PLL_SYSCLK.ioc" stamp="1642191316907" updateReferences="true"/>
+</session>

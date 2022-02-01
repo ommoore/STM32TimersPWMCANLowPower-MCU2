@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;WFI_button/Sleep-On-Exit_1.ioc&apos; to &apos;WFI_button.ioc&apos;" description="Rename resource &apos;Sleep-On-Exit_1.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="Sleep-On-Exit_1.ioc" name="WFI_button.ioc" stamp="1643336797598" updateReferences="true"/>
+</session>

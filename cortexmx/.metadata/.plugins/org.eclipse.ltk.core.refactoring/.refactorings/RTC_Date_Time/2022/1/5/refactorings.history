@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;RTC_Date_Time/BkupSRAM_Standby.ioc&apos; to &apos;RTC_Date_Time.ioc&apos;" description="Rename resource &apos;BkupSRAM_Standby.ioc&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="BkupSRAM_Standby.ioc" name="RTC_Date_Time.ioc" stamp="1643484555281" updateReferences="true"/>
+</session>

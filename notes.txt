@@ -1,0 +1,2545 @@
+***************************************************************************
+	Mastering Microcontroller: Timers, PWM, CAN, Low Power (MCU2) Notes:
+***************************************************************************
+
+*********************************************************************************************************
+							Section 5: STM32 HAL and Project Architecture
+*********************************************************************************************************
+Application Code + Source Files
+		|
+		v
+STM32-CUBE Layer (STM32Fx_HAL_DRIVER)
+(The HAL hardware abstraction layer, enabling portability between different STM32 devices via standardized API calls)
+(Includes startup file for MCU)
+	|							|
+	v 							|
+CMSIS-CORE						|
+(Core Access, Functions, 		|
+Peripherals and Interrupt 		|
+Definitions)					|
+	|							|	
+	v							v
+(ARM Cortex Mx Processor) <-> Microcontroller
+
+---------------
+Some Mandatory and Optional MCU Inits:
+. Flash Controller Inits
+	- Enabling pre-fetch buffer, Data cache, Instruction cache if supported (optional)
+. Floating point unit inits if supported (optional)
+. Setting up Stack (mandatory)
+. System Clock settings (optional) (HSI, HSE, SystemPLL)
+. Flash wait state settings when system clock is more (mandatory)
+. Systick Timer initialization to trigger interrupt for every 1ms (required when you use STM32 HAL APIs)
+
+---------------
+STM32 Cube Framework Program Flow
+
+main.c
+main(){}
+|				                       stm32f4xx_hal.c
+|- HAL_Init() -----------------------> HAL_Init(){}
+|											|
+|- SystemClock_Config()						|-- HAL_MspInit()
+| /*Configure the system clock*/			|	/*Init the low level hardware*/
+|											|	. Setting up priority grouping
+|											|	. Enabling required system exceptions
+|											|	. Setting priorities for system exceptions
+|											|	. Other processor specific settings as per application needs
+
+
+. 1st function that has to be called within main() has to be HAL_Init() which is used to initialize the device HAL layer of the STM32 Cube Framework.
+  This function is implemented within stm32f4xx_hal.c .
+. 2nd function that has to be called from main() is SystemClock_Config() which configures the microcontroller's system clock.
+  This function is not mandatory, so it may work without it. If it is not initialized, the microcontroller will use its internal 16MHz RC oscillator (HSI) which might be 
+  sufficient for most peripheral applications. Ethernet, USB, SDIO, etc would require a higher clockspeed than 16MHz, so SystemClock_Config() would need to be configured to use
+  the PLL engine of the microcontroller.
+  This function is not provided by the STM32 HAL layer, so it needs to be implemented separately.
+  TLDR: <16MHz nothing extra required. 
+        >16MHz requires PLL through extra configuration of SystemClock_Config().
+		
+.                      			HAL_Init()
+		____________________________|____________________________
+		|							|							|
+Flash Interface Init		SysTick Timer init 				Other Processor Specific
+		^					to generate interrupt 			Low Level Init
+stm32f4xx_hal_conf.h		for 1ms									|
+															(Application specific)
+							(Req. for Cube HAL API's				v
+							to work properly)				HAL_MspInit()
+							
+
+. HAL_MspInit()
+	- Microcontroller Support Package
+	- Implemented in application layer (stm32f4xx_hal_msp.c)
+		- Here you can change application specific processor inits such as:
+			1) Enabling required System exception
+			2) Configuring priority for System Exception
+			3) Enabling and configuring other processor features such as MPU,FPU,etc if required.
+
+
+. Application(main.c)         		msp.c               					it.c
+	^		| (uart_init())				^									^|
+	|		|(uart_transmit_it())		| (uart_msp_init())					||
+Callbacks	Driver API				Peripheral Init		 Interrupt Handlers || Interrupt Processing
+	|		v							|									|v
+///////////////////////// STM32 Cube HAL (ex. stm32f4xx_hal_uart.c) /////////////////////
+										v
+//////////////////////////////// Microcontroller (ex. uart) ////////////////////////////
+
+. Example: UART Peripheral Initialization
+1. High-Level Initialization (main.c)
+	. Baudrate settings
+	. STOP bit, Parity settings, etc
+2. Low-Level Initialization (msp.c)
+	. Enabling UART IRQ in NVIC
+	. Enabling Peripheral clock in the APB domain
+	. Configuring GPIO Pins to behave as UART Tx and Rx pin (alternate function config or also called pin muxing)
+*When a peripheral issues an interrupt, you should check that peripheral's "Status" register to understand reason for interrupt.*
+
+. Peripheral Handle Structure:
+UART_HandleTypeDef huart2;
+
+/**
+  *  @brief UART Handle Structure Definition
+  */
+typedef struct {
+	USART_TypeDef 		*Instance; 		/*!< UART Register's Base Address */
+	UART_InitTypeDef 	Init; 			/*!< UART Communication Parameters */
+	uint8_t				*pTxBuffPtr;	/*!< Pointer to UART Tx Transfer Buffer */
+	uint16_t			TxXferSize;		/*!< UART Tx Transfer Sizes */
+	__IO uint16_t 		TxXferCount;	/*!< UART Tx Transfer Counter */
+	__IO uint32_t 		ErrorCode;		/*!< UART Error Code */
+} UART_HandleTypeDef;
+
+Handle Structure:
+XX_TypeDef 		//used to hold peripheral register base addresses
+XX_InitTypeDef 	//used to hold peripheral configurable parameters
+
+Other examples:
+TIM_HandleTypeDef	//stm32f4xx_hal_tim.h
+RTC_HandleTypeDef	//stm32f4xx_hal_rtc.h
+SPI_HandleTypeDef	//stm32f4xx_hal_spi.h
+I2C_HandleTypeDef	//stm32f4xx_hal_i2c.h
+UART_HandleTypeDef	//stm32f4xx_hal_uart.h
+CAN_HandleTypeDef	//stm32f4xx_hal_can.h
+RCC_HandleTypeDef	//stm32f4xx_hal_rcc.h
+
+XX_TypeDef:
+. This structure you will find in the device specific header file.
+. For example, in the case of STM32F446RE MCU, it is found in stm32f446xx.h
+. This structure describes the register details of a particular peripheral in the order they appear in the memory map.
+
+/**
+  *  @brief Universal Synchronous Asynchronous Receiver Transmitter
+  */
+typedef struct {
+	__IO uint32_t 	SR; 	/*!< USART Status Register. 					Address offset: 0x00 */
+	__IO uint32_t 	DR; 	/*!< USART Data Register. 						Address offset: 0x04 */
+	__IO uint32_t	BRR;	/*!< USART Baud Rate Register.			 		Address offset: 0x08 */
+	__IO uint32_t	CR1;	/*!< USART Control Register 1. 					Address offset: 0x0C */
+	__IO uint32_t 	CR2;	/*!< USART Control Register 2. 					Address offset: 0x10 */
+	__IO uint32_t 	CR3;	/*!< USART Control Register 3. 					Address offset: 0x14 */
+	__IO uint32_t	GTPR;	/*!< USART Guard Time and Prescaler Register. 	Address offset: 0x18 */
+} USART_TypeDef;
+
+Linking Handler Structure and Peripheral:
+	. Linking happens by means of base address of the peripheral
+	
+	How to Find the Base Address of the Peripheral:
+		. Find out which bus the peripheral is connected to.
+		. Find out the base address of the bus that the peripheral is connected to.
+		. Find out the offset of the peripheral from the base address of the bus.
+		. Add "offset" to base address of the bus.
+		
+						Peripheral base = 0x4000_0000
+									|
+	|-------------------|-----------------------|-----------------------|
+	v					v						v						v
+	APB1				APB2					AHB1					AHB2
+	offset: 0			offset: 0x0001_0000 	offset: 0x0002_0000		offset: 0x1000_0000
+	BA = 0x4000_0000 	BA = 0x4001_0000		BA = 0x4002_0000		BA = 0x5000_0000
+		|
+		v
+	UART4 (APB1 bus)
+	offset: 0x4C00
+	BA: 0x4000_4C00
+		|
+		v
+	Peripheral Register Address Calculation:
+	USART_SR		offset: 0x00
+	USART_DR		offset: 0x04
+	USART_BRR		offset: 0x08
+	USART_CR1		offset: 0x0C
+	USART_CR2		offset: 0x10
+	USART_CR3		offset: 0x14
+	USART_GTPR		offset: 0x18
+	
+	STM32 Cube Header File Hierarchy:
+	#include "stm32f4xx.h"			//This is for MCU family
+			|
+			v
+	#include "stm32f446xx.h"		//This is for the device (MCU)
+									//This describes your microcontroller, its IRQ definitions, memory map,
+									//register details of peripheral, clock management macros, and other useful macros
+	
+	#include "stm32f4xx_hal.h"   	//This is for Cube HAL (Hardware Abstraction Layer)
+	
+	
+*********************************************************************************************************
+							Section 6: STM32 HAL Program Flow and UART Exercise
+*********************************************************************************************************
+
+Exercise:
+Write a program to send characters over UART to MCU. MCU should convert all lower case letters to uppercase and send it back to user.
+UART Config:
+Baudrate = 115200
+No of Data Bits = 8
+Stop Bits = 1
+Parity = None
+UART hardware flow control = None
+USART2 peripheral in Asynchronous mode (UART mode)
+
+Low Level Hardware Initializations
+. Processor Specific 
+	- Configure the Priority group of the processor
+	- Enable required Processor System Exceptions
+		. Bus fault, mem manage, usage fault, Systick, etc
+	- Configure the priority of system exceptions
+	- Other Initializations related to MPU, Floating point unit, Sleep mode, etc.
+
+Peripheral Initializations: UART2
+
+- High-Level Init: //Parameter Initializations
+	1. //main.c
+	
+	. Define a handle variable to Handle the required peripheral as a global variable in the program
+		UART_HandleTypeDef huart2;
+		
+	. Link and initialize the handle variable
+		huart2.Instance = USART2; //linking. macros for base addresses found in stm32f446xx.h 
+		huart2.Init.BaudRate = 115200;
+		huart2.Init.WordLength = UART_WORDLENGTH_8B;
+		huart2.Init.StopBits = UART_STOPBITS_1;
+		huart2.Init.Parity = UART_PARITY_NONE;
+		huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+		huart2.Init.Mode = UART_MODE_TX_RX;
+		
+	. Use the init API of the peripheral
+		if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+			//There is a problem
+			Error_handler();
+		}
+
+- Low-Level Init: //Pin Settings/MUXing, Clock Enable, IRQ Enable, NVIC Settings
+	1.a HAL_UART_Init() 			//stm32f4xx_hal_uart.c
+		1.b HAL_UART_MspInit(huart) //msp.c
+	2. SysTickHandler() 			//it.c
+	
+	. Enable the required peripheral clocks for USART2 and GPIOA
+		__HAL_RCC_USART2_CLK_ENABLE();
+		__HAL_RCC_GPIOA_CLK_ENABLE();
+		
+	. Do pin muxing configurations
+		. UART needs 2 pins: TX and RX
+		. Can use 2 GPIOs of the MCU as UART TX and RX functions
+		. Before that, the pinmodes of the GPIO need to be configured to alternate functionality mode.
+		. In this case, the PA2 and PA3 alternate function modes are USART2_TX and USART2_RX respectively on AF7.
+			. PA2 and PA3 are already used as USART2 for the ST-Link debug VirtualCOM port connection to PC via USB.
+			. PD5 and PD6 could also be used in AF7 for USART2.
+		
+		gpio_uart.Pin = GPIO_PIN_2; //USART2_TX
+		gpio_uart.Mode = GPIO_MODE_AF_PP;
+		gpio_uart.Pull = GPIO_PULLUP;
+		gpio_uart.Speed = GPIO_SPEED_FREQ_LOW;
+		gpio_uart.Alternate = GPIO_AF7_USART2; 
+		HAL_GPIO_Init(GPIOA, &gpio_uart);
+
+		gpio_uart.Pin = GPIO_PIN_3; //USART2_RX
+		HAL_GPIO_Init(GPIOA, &gpio_uart);
+		
+	. Enable the peripheral IRQ in the NVIC
+		HAL_NVIC_EnableIRQ(USART2_IRQn);
+		
+	. Set the priorities based on application needs
+		HAL_NVIC_SetPriority(USART2_IRQn, 15, 0);
+	
+	. Create the SysTick Handler 	//it.c 
+		void SysTick_Handler(void) {
+		
+			HAL_IncTick();
+			HAL_SYSTICK_IRQHandler();
+		}
+	
+STM32 Cube Peripheral Data Handling API Flavors
+	. Non-Interrupt based (polling) (blocking)
+		- HAL_UART_Transmit() and HAL_UART_Receive()
+	. Interrupt based (non-blocking)
+		- HAL_UART_Transmit_IT() and HAL_UART_Receive_IT()
+	. DMA based (Uses DMA controller of MCU and Interrupts)
+		- HAL_UART_Transmit_DMA() and HAL_UART_Receive_DMA()
+
+UART2_Example	
+. USART2 Data Tx Example
+	uint16_t len_of_data = strlen(user_data);
+	HAL_UART_Transmit(&huart2, (uint8_t*)user_data, len_of_data, HAL_MAX_DELAY);
+	
+. USART2 Data Rx Example (Echo received data by transmitting the rx_buffer over UART )
+	uint8_t rx_data;
+	uint8_t rx_buffer[100];
+	uint32_t count = 0;
+
+	while(1) {
+		HAL_UART_Receive(&huart2, &rx_data, 1, HAL_MAX_DELAY);
+		if(rx_data == '\r') {
+			break;
+		} else {
+			rx_buffer[count++] = convert_to_upper(rx_data);
+		}
+
+	}
+
+	HAL_UART_Transmit(&huart2, rx_buffer, count, HAL_MAX_DELAY);
+
+	uint8_t convert_to_upper(uint8_t data) {
+
+		if((data >= 'a') && (data <= 'z')) {
+			data = data - ('a' - 'A'); //data = data - 32;
+		}
+
+		return data;
+	}
+
+TeraTerm Terminal Setup:
+	New-Line Receive: CR+LF
+	New-Line Transmit: CR
+	Local Echo: enabled
+	
+UART2_Example_IT
+
+Handling interrupts in the project: (it.c)
+	. Add the required IRQ handler definitions in the it.c file
+	. The name of the IRQ handler can be obtained from the startup file
+	. STM32 Cube Framework gives IRQ processing API for every peripheral.
+		. Ex: HAL_UART_IRQHandler() to process UART global interrupt, which must be called from the IRQ handler.
+		
+		extern UART_HandleTypeDef huart2;
+		
+		void USART2_IRQHandler(void) {
+			HAL_UART_IRQHandler(&huart2);
+		}
+
+	//Callback function invoked when the desired number bytes are received by the uart peripheral
+	void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+
+		if(huart->Instance == USART2) {
+			if(rx_data == '\r') {
+				rxcmplt = TRUE;
+				rx_buffer[count++] = '\r';
+				HAL_UART_Transmit(huart, rx_buffer, count, HAL_MAX_DELAY);
+
+			} else {
+				rx_buffer[count++] = rx_data;
+			}
+		}
+	}
+
+*********************************************************************************************************
+								Section 7: Clocks and PLL Programming
+*********************************************************************************************************
+
+Understanding HSI,HSE,PLL,HCLK,PCLKx and Configuration:
+
+System Clock (SYSCLK)
+. Three different clock sources can be used to drive the system clock (SYSCLK)
+	- HSI (high speed internal) oscillator clock
+	- HSE (high speed external) oscillator clock
+	- Two main PLL (phase locked loop) clocks
+. The devices have the two following secondary clock sources
+	- 32kHz low-speed internal RC (LSI RC) which drives the independent watchdog and, optionally, the RTC used 
+	  for Auto-wakeup from the Stop/Standby mode.
+	- 32.768 kHz low-speed external crystal (LSE crystal) which optionally drives the RTCclock (RTCCLK)
+	
+Nucleo-F446RE board
+. HSI -> 16MHz (internal to MCU)
+. HSE -> 6MHz (external to MCU)
+. PLL -> up to 180MHz (internal to MCU)
+. LSI -> 32kHz (internal to MCU)
+. LSE -> 32.768kHz (external to MCU)
+
+Default Clock State
+After resset of the MCU:
+	. HSI is ON, HSE is OFF, PLL is OFF, LSE is OFF, LSI is OFF
+So, SYSCLK is sourced by HSI by default:
+	. SYSCLK = HSI = 16MHZ
+*Each clock source can be switched on/off independently when it is not used, to optimize power consumption*
+
+High Speed Internal Oscillator Clock (HSI)
+. The HSI is used (enabled by hardware) as the system clock source after startup from Reset, wakeup from STOP and STANDBY modes,
+  or in the case of failure of the HSE used directly or indirectly as the system clock.
+. The HSI RC oscillator has the advantage of providing a clock source at low cost (no external components).
+. It also has a faster startup time than the HSE crystal oscillator.
+. However, even with calibration, the frequency is less accurate than an external crystal oscillator or ceramic resonator.
+. The HSI signal can also be used as a backup source (auxiliary clock) if the HSE crystal oscillator fails.
+
+STM32 Cube Clock Handling APIs
+/////////////STM32 HAL RCC Driver////////////
+	|								 |
+	source					    	header
+stm32f4xx_hal_rcc.c				stm32f4xx_hal_rcc.h
+stm32f4xx_hal_rcc_ex.c			stm32f4xx_hal_rcc_ex.h
+
+Methods to Configure the SYSCLK Source
+1. First enable the required clock and wait until the clock is ready. If you application needs PLL, then configure PLL and enable it.
+2. Initialize the CPU, AHB, and APB bus clock prescalers according to application requirements. Do not cross max limits.
+3. Configure the flash latency properly by referring to MCU RM.
+4. Select newly enabled Clock as SYSCLK.
+
+APIs:
+HAL_RCC_OscConfig(RCC_OscInitTypeDef *RCC_OscInitStruct)   						//Step 1
+HAL_RCC_ClockConfig(RCC_ClkInitTypeDef *RCC_ClkInitStruct, uint32_t FLatency) 	//Steps 2-4
+
+Exercise:
+Using HSE, configure the SYSCLK as 8MHz
+AHB clock as 4MHz (HCLK)
+APB1 clock as 2MHz (PCLK1)
+APB2 clock as 2MHz (PCLK2)
+
+Tip: Use clock tree in reference manual or in CubeMX programmer to visualize the clock configurations
+
+HSE -> SYSCLK -> AHB Prescaler -> HCLK -> APB1 Prescaler -> PCLK1
+8MHz    8MHz           /2         4MHz         /2           2MHz
+									  |-> APB2 Prescaler -> PCLK2
+Hardware Configuration						   /2           2MHz
+
+HSE_BYPASS:
+External Clock:
+			   
+|______   _____OSC_OUT __|
+		^	   (HI-Z)
+		|
+	Ext Source
+	
+
+HSE_ON PHYSICAL CONNECTION:	
+Crystal/ceramic resonators:
+
+|__ OSC_IN ____ OSC_OUT __|
+	   |		   |
+ --||------|[]|-------||--
+|  C_L1	   load     C_L2  |
+GND	 <- capacitors ->	GND
+
+
+HSI Calibration
+. The operating temperature has an impact on the accuracy of the RC oscillators. At 25*C, the HIS oscillators 
+  have an accuracy of +/- 1% typically, but in the temperature range of -40 to 105*C, the accuracy decreases.
+
+. To compensate for the influence of temperature in the application, the output freq of the HSI oscillator can 
+  be further trimmed by the user runtime calibration routine to improve the HSI frequency accuracy. This may prove 
+  crucial for communication peripherals.
+  
+. RCC Clock Control Register (RCC_CR)
+  HSI RC oscillators are factory calibrated by ST to have a 1% accuracy at TA=25*C. After reset, the factory calibration 
+  value is automatically loaded into the internal calibration bits.
+
+. The calibration value is loaded in HSICAL[7:0] bits after reset. Five trimming bits HSITRIM[4:0] are used for 
+  fine-tuning. The default trimming value is 16.
+
+. The frequency of the internal RC oscillators can be fine-tuned to achieve better accuracy with wider temperature 
+  and supply voltage ranges. The trimming bits are used for this purpose.
+  
+. HSITRIM[4:0] is factory calibrated to 16 (0b10000) and automated loaded into HSICAL[7:0]
+
+. Effect of HSITRIM[4:0]
+	- The default trimming value is 16
+	- An increase in this trimming value causes an increase in HSI frequency.
+	- A decrease in this trimming value causes a decrease in HSI frequency.
+	- The HSI oscillator is fine-tuned in steps of 0.5% (around 80kHz)
+	
+. Summary
+	- Writing a trimming value in the range of 17-31 increases HSI frequency
+	- Writing a trimming value in the range of 0-15 decreases the HSI frequency
+	- Writing a trimming value equal to 16 causes the HSI frequency to keep its default value (+/- 1%)
+	
+	
+Phase Locked Loop (PLL)
+. The PLL engine of the MCU is used to generate different high frequency output clocks by taking input 
+  clock sources such as HSE or HSI.
+. By using PLL, you can drive SYSCLK up to 180MHz in STM32F446RE MCU.
+
+								Main PLL
+						_________________________________________									
+	PLL Source Mux      |                                       |  ^ PLLCLK
+	  8MHz	 |\	 f_(vco_input_clk)  f_(vco_output_clk)			|  |
+HSE -------->|| -> /M -----_> VCO  ------------------ /P ----------|
+HSI -------->||			| |		    |			 |___ /Q		|
+	  16MHz  |/			| |__ *N ___|			 |___ /R		|
+						|										|	
+						|_______________________________________|
+
+Summary:
+. The core of the Main PLL is the VCO (Voltage Control Oscillator).
+. An input clock (HSI or HSE) is required, but it cannot be given directly. It needs to be passed through the 'M' divider 
+  or /M to become f_vco_input_clk.
+. The input to VCO, in combination with the multiplication factor *N, creates f_vco_output_clk which is very high frequency.
+. Finally, f_vco_output_clk is divided by 'P' divider, or /P, to become the PLLCLK which can then be used for SYSCLK.
+
+** Important **
+/M consideration:
+1MHz < f_vco_input_clock <= 2MHz
+
+*N consideration:
+100MHz <= f_vco_output_clock <= 432MHz
+
+PLL Formulas:
+f_(vco_output_clock) = [f_(vco_input_clock) / PLLM] * PLLN
+f_(PLL_general_clock_output) = (f_(vco_output_clock) / PLLP) = PLLCLK
+
+Exercise:
+Write an application to generate below HCLK frequencies using PLL. Use HSI as PLL's input source and 
+repeat the exercise using HSE as input source.
+	-50MHz
+	-84MHz
+	-120MHz
+	
+RCC_PLLCFGR - RCC PLL Configuration Register
+
+PLL Configuration
+PLLCLK ----> SYSCLK ----> AHB Prescaler ----> HCLK ----> 50MHZ
+			   50			    1 				50
+
+PLLM /8
+PLLN *100
+/P 2
+/Q 2
+/R 2
+
+another example:
+
+HSI = 16MHz -> /M = 16 -> f_vco_input_clock = 1MHz & xN = 100 -> f_vco_output_clock = 100MHz -> /P = 2 -> PLLCLK = 50MHz
+
+Exercise:
+Write an application using PLL configuration to boost the HCLK to maximum capacity (180MHz for STM32F446RE) 
+by using HSE as PLL source.
+
+*********************************************************************************************************
+									Section 8: Timers & PWM
+*********************************************************************************************************
+Basic, General Purpose, Input Capture, Output Capture, PWM
+
+Timers:
+. What is a Timer?
+	- It is another peripheral of the MCU.
+. What are the uses of a Timer?
+	- Time base generation
+	- Measuring/counting input signal frequency (measuring timeperiods of waveforms)
+	- Producing different waveforms
+	- Measuring pulse width
+	- Generating pulse width modulated signals (PWM)
+	- Triggering external devices
+. What does it do?
+	- A timer at the most basic level, counts from 0 to some pre-programmed value (up counting)
+	  or from some pre-programmed value to 0 (down counting)
+. Types of STM32 Timers
+	. Basic Timers (available in all STM32 MCUs)
+	. General Purpose Timers (available in almost all STM32 MCUs)
+	. Advanced Timer (not available in all STM32 MCUs)
+	
+. Timer Availability Table from "Timer Application Note" (Table 2. Simplified overview of timer availability in STM32 products)
+	- Under the STM32 F2/F4 (excluding /F401, /F411, /F410) column  (Our MCU is STM32F446RE)
+		- Advanced Timers 
+			. TIM1 and TIM8
+		- General Purpose Timers
+			. 32-bit: TIM2 and TIM5
+			. 16-bit: TIM3 and TIM4
+		- Basic Timers
+			. TIM6 and TIM7
+		- 1-Channel
+			. TIM10, TIM11, TIM13, and TIM14
+		- 2-Channel
+			. TIM9 and TIM12
+		- 2-Channel with Complementary Output
+			. N/A
+		- 1-Channel with Complementary Output
+			. N/A
+		- Low-power Timer
+			. N/A
+		- High-resolution Timer
+			. N/A
+			
+	- A more sophisticated timer can be used in a simpler condition 
+		. Advanced Timer used as Basic or General Purpose Timer
+		. General Purpose Timer (16 and 32-bit) and be used as Basic Timer (16-bit)
+	- All Basic Timers are 16-bit timers (counts from 0x0 to 0xFFFF)
+	
+Summary:
+. The number of timer peripherals and their respective features differ from one STM32 MCU family to another, but they 
+  all share common features and operating modes.
+. For example, the STM32F100 MCU embed a timer peripheral named TIM17, but the total number of timer peripherals embedded by these MCUs is less than 17.
+. In general, across the STM32 MCU families, the timer peripherals that have the same name also have the same features set (with a few exceptions).
+. The level of features integration for a given timer peripheral is decided based on the application's field that it targets.
+
+Basic Timers:
+. These timers have a basic counting engine, and are primarily used for time base generation.
+. These timers do not have input/output channels associated with them.
+
+
+								STM32 Basic Timer Assembly (Block Diagram)
+								
+												_________________________		TRGO
+					Internal clock (CK_INT)		|	Trigger Controller  |---------------------------> to DAC
+TIMxCLK from RCC ------------------------------>|	             _______| Reset, enable, count
+												|	            |Control|-----------|
+												|_______________________|		    |
+																				    |
+		|---------------------------------------------------------------------------|																				
+		|										______________________
+		|								U -\/\->|Auto-reload register|         
+		|												|					   |-/\/-> UI
+		|							 Stop, clear, or up |----------------------|----->
+		|CK_PSC	     ___________  CK_CNT  ______________v____________________  |-\/\-> U
+		|----------->|   PSC	|-------->|+	 CNT counter	(16-bit)	|
+					 | prescaler|		  |_________________________________|
+
+**The lower half of above diagram is the time base unit of the timer**
+
+Time base unit
+1. 16-bit upcounter
+2. Counter register (TIMx_CNT)
+	* You cannot see directly inside "Counter" through code, you have to read the TIMx_CNT register to obtain a snapshot of counter value.
+3. Prescaler Register (TIMx_PSC)
+4. Auto-Reload Register (TIMx_ARR)
+
+Exercise:
+Use the basic timer to generate interrupt for every 100ms. Toggle the GPIO or LED inside the Timer IRQ handler and verify using logic analyzer
+Project: timebase_100ms
+
+Timer Handle Structure
+/**
+  * @brief  TIM Time Base Handle Structure definition
+  */
+typedef struct
+{
+  TIM_TypeDef                        *Instance;         /*!< Register base address                             */
+  TIM_Base_InitTypeDef               Init;              /*!< TIM Time Base required parameters                 */
+  HAL_TIM_ActiveChannel              Channel;           /*!< Active channel                                    */
+  DMA_HandleTypeDef                  *hdma[7];          /*!< DMA Handlers array
+                                                             This array is accessed by a @ref DMA_Handle_index */
+  HAL_LockTypeDef                    Lock;              /*!< Locking object                                    */
+  __IO HAL_TIM_StateTypeDef          State;             /*!< TIM operation state                               */
+  __IO HAL_TIM_ChannelStateTypeDef   ChannelState[4];   /*!< TIM channel operation state                       */
+  __IO HAL_TIM_ChannelStateTypeDef   ChannelNState[4];  /*!< TIM complementary channel operation state         */
+  __IO HAL_TIM_DMABurstStateTypeDef  DMABurstState;     /*!< DMA burst operation state                         */
+} TIM_HandleTypeDef;
+
+Timer Init Config Structure
+/**
+  * @brief  TIM Time base Configuration Structure definition
+  */
+typedef struct
+{
+  uint32_t Prescaler;         /*!< Specifies the prescaler value used to divide the TIM clock.
+                                   This parameter can be a number between Min_Data = 0x0000 and Max_Data = 0xFFFF */
+
+  uint32_t CounterMode;       /*!< Specifies the counter mode.
+                                   This parameter can be a value of @ref TIM_Counter_Mode */
+
+  uint32_t Period;            /*!< Specifies the period value to be loaded into the active
+                                   Auto-Reload Register at the next update event.
+                                   This parameter can be a number between Min_Data = 0x0000 and Max_Data = 0xFFFF.  */
+
+  uint32_t ClockDivision;     /*!< Specifies the clock division.
+                                   This parameter can be a value of @ref TIM_ClockDivision */
+
+  uint32_t RepetitionCounter;  /*!< Specifies the repetition counter value. Each time the RCR downcounter
+                                    reaches zero, an update event is generated and counting restarts
+                                    from the RCR value (N).
+                                    This means in PWM mode that (N+1) corresponds to:
+                                        - the number of PWM periods in edge-aligned mode
+                                        - the number of half PWM period in center-aligned mode
+                                     GP timers: this parameter must be a number between Min_Data = 0x00 and
+                                     Max_Data = 0xFF.
+                                     Advanced timers: this parameter must be a number between Min_Data = 0x0000 and
+                                     Max_Data = 0xFFFF. */
+
+  uint32_t AutoReloadPreload;  /*!< Specifies the auto-reload preload.
+                                   This parameter can be a value of @ref TIM_AutoReloadPreload */
+} TIM_Base_InitTypeDef;
+
+//**Basic Timer only uses Prescaler, CounterMode and Period member elements of structure.**
+//**ClockDivision, RepetitionCounter and AutoReloadPreload member elements are used with general purpose and advanced timers.**
+
+/** @defgroup TIM_Counter_Mode TIM Counter Mode
+  * @{
+  */
+#define TIM_COUNTERMODE_UP                 0x00000000U                          /*!< Counter used as up-counter   */
+#define TIM_COUNTERMODE_DOWN               TIM_CR1_DIR                          /*!< Counter used as down-counter */
+#define TIM_COUNTERMODE_CENTERALIGNED1     TIM_CR1_CMS_0                        /*!< Center-aligned mode 1        */
+#define TIM_COUNTERMODE_CENTERALIGNED2     TIM_CR1_CMS_1                        /*!< Center-aligned mode 2        */
+#define TIM_COUNTERMODE_CENTERALIGNED3     TIM_CR1_CMS                          /*!< Center-aligned mode 3        */
+
+//**Basic Timers are only compatible with TIM_COUNTERMODE_UP, while general purpose and advanced timers can utilize the rest.**
+
+
+What is the Timer Clock?
+. By default, HSI (16MHz) is used for the System Clock.
+. TIM6 peripheral is connected to the APB1 bus, so the APB1 Prescaler (default = 1) needs to be adjusted accordingly (within RCC_CFGR register).
+	. Default: SYSCLK(16MHz) -> AHB Prescaler(/1) -> HCLK(16MHZ) -> APB1 Prescaler(/1) -> multiplier (x1) -> APB1 Timer clocks(16MHz)
+		. The APB1/2 Timer Clocks do not have the same max frequency limitations as the APB1/2 peripheral clocks, so the multiplier is used
+		  to obtain higher clock frequencies than the maximum limit for the peripheral clock on the same bus. This multiplier value is either
+		  (x1 if APBx prescaler = 1) or (x2 if APBx prescaler != 1), meaning it is dependent to the prescaler value and is not set manually.
+
+		  
+How the Prescaler affects TIMx_CLK:
+
+prescaler output (CNT_CLK) = TIMx_CLK / (prescaler+1)
+
+Note: For a basic timer, the prescaler clock (CK_PSC) and the timer clock (TIMxCLK from RCC) are the same.
+
+Using the above equation:
+CNT_CLK = 16MHz / (0+1) = 16MHz
+
+TIMx_PSC and TIMx_ARR registers are used to set the prescaler and auto-reload register values.
+Note: The Timer will not start if ARR register value is set to zero.
+
+Exercise: Period Value Calculation
+What is the period value required to get a time base of 100ms?
+
+consider prescaler = 0 (default)
+CNT_CLK = = 16MHz / (0+1) = 16MHz
+time_period = 0.0625us
+period_value = 100ms/time_period = 1600000 
+ARR = period_value
+
+But ARR is a 16-bit register (max 65535), so this period value is not valid. In order to fix this issue,
+the CNT_CLK needs to be reduced so a different prescaler is needed (1).
+
+consider prescaler = 1
+CNT_CLK = 16MHz / (1+1) = 8MHz
+time_period = 0.125us
+period_value = 100ms/time_period = 800000 
+ARR = period_value
+
+still too high of a period_value for the ARR register (max 65535)
+
+consider prescaler = 24
+CNT_CLK = 16MHz / (24+1) = 0.64MHz = 640kHz
+time_period = 1.5625us
+period_value = 100ms/time_period = 64000
+ARR = period_value
+
+
+Time base generation formula
+update_event = TIM_CLK / ((PSC+1)*(ARR+1))
+
+*Note: Once the timer starts ticking, its operation is independent of the processor. Periodic Timers will
+keep ticking unless timer clock is stopped or timer is explicitly stopped.*
+
+After viewing timebase 100ms application in Saleae Logic analyzer, there was ~1ms of error seen. This does not mean the timer
+update events are inaccurate.
+Possible reasons for the inaccuracy are:
+1) Usage of HSI (HSE is a more accurate source to use for SYSCLK)
+2) Measurement Errors (trace software induced errors, using code to toggle GPIO, etc)
+
+Timer Period Value calculation for 10us:
+TIMx_CLK = 50MHz
+Prescaler = 9
+CNT_CLK = 5MHz
+Time Period of CNT_CLK = 0.2us = 200ns
+Period Value (ARR) = 50
+Time base req = 10us
+
+In this example, we were using code (HAL_GPIO_Togglepin()) to toggle a GPIO whenever update event happens, but a 
+timer peripheral can do that automatically without using any code, for that we have to use OUTPUT COMPARE feature of the timer
+which is available in the general purpose timer.
+
+Software toggling of GPIO actually consumes a lot of clock cycles from using extraneous code. This will compound additional error when measuring
+the time period on the logic analyzer.
+
+*********************************************************************************************************
+							Section 9: General Purpose Timers: Input Capture Unit
+*********************************************************************************************************
+
+Exercise:
+To measure the time period of a signal using a Timer.
+Use LSE and HSI as the input signal to Timer.
+LSE = 32.768MHz, HSI = 16MHz
+
+General Purpose Timers:
+TIM2-5, 9-14
+*includes functionality of basic timers
+
+For each general purpose timer, there are 4 input channels (TIMx_CH1..4), each connected to individual input filters with edge detection, 
+followed by a prescaler, and then a capture/compare register, with an output control block that becomes the output channel.
+	. Capture is for input block, compare is for output block.
+	
+Timer with an input capture block:
+The external frequency is not measured directly but is computed from the number of clock pulses counted using the timer.
+The Timer counter counts for every 1ms, TIM_CNT_CLK = 1kHz.
+On counts 54 and 61, the input signal had a rising edge trigger event, and the value of the CNT register is stored in the 
+capture/compare register (CCR) and interrupt is triggered.
+
+When a rising edge occurs, a capture interrupt will be generated by the timer engine and a capture event callback will be called to the main application.
+When this interrupt occurs, the value in the capture/compare register needs to be saved so it doesn't gets overwritten by the next interrupt.
+
+Working with Timer Input Channel and STM32 Cube:
+1) Initialize the TIMER Input Capture Time base
+	HAL_TIM_IC_Init(TIM_HandleTypeDef *htim)
+	
+2) Configure Input Channel of the Timer
+	HAL_TIM_IC_ConfigChannel(TIM_HandleTypeDef *htim, TIM_IC_InitTypeDef* sConfig, uint32_t Channel)
+
+TIM3&4 are 16-bit
+TIM2&5 are 32-bit
+
+typedef struct {
+	uint32_t ICPolarity; 	//Edge detection block
+	uint32_t ICSelection;	//TI1FP1 (direct, indirect, or trc)
+	uint32_t ICPrescaler;	//Divider /1, /2, /4, /8
+	uint32_t ICFilter;		//Filter downcounter
+} TIM_IC_InitTypeDef;
+
+TIMx Capture/Compare Mode Register 1 (TIMx_CCMR1) -> Channels 1,2
+TIMx Capture/Compare Mode Register 2 (TIMx_CCMR2) -> Channels 3,4
+
+					     input channel 1
+    LSE ---------> PA0 -------------------> TIM2
+32.768kHz
+
+LSE (Low Speed External) Crystal Oscillator is actually present on the Nucleo development board and needs to be configured to use.
+
+Exercise using SystemClock HSE, and LSE config with HSI:
+Note: The reason the app is not working as expected is because the processor is hanging in the TIMER2 IRQ handler due to the input capture interrupt
+getting triggered every 0.25us which is way less than the amount of time the processor takes to finish executing the IRQ handler.
+
+Time Required to finish the Timer2 IRQ handler (in the application setup)
+Minimum time of 5.5us based on application config (4MHz signal is too high and not possible)
+
+50kHz example: using TIM6 (basic timer) to produce a 50kHz waveform to toggle a gpio every 20us (10us high, 10us low)
+
+*********************************************************************************************************
+							Section 10: General Purpose Timers: Output Compare Unit
+*********************************************************************************************************
+
+Timer Modes:
+1. Basic Time base generation
+2. Input Capture Mode
+3. Output Compare Mode
+4. PWM Mode
+5. One Pulse Mode
+
+Exercise: TIMER Output Compare Mode
+Write an application by using TIMER2, to produce square waveforms of 500Hz, 1kHz, 2kHz, 4kHz on 4 different output channels.
+TIM2_CH1 -> 500Hz
+TIM2_CH2 -> 1kHz
+TIM2_CH3 -> 2kHz
+TIM2_CH4 -> 4kHz
+
+Each general purpose timer only has 4 channels, it does not have 4 separate input and 4 separate output channels. 
+You can use a channel either as input or output.
+
+How to produce waveforms using OC mode:
+. Prestore a value in the CCR1 register (pulse value)
+. Then we trigger the timer when CNT value == CCR1 value
+	. Output Channel will be toggled
+	. Pulse width of output channel can be controlled by using the pulse value in the CCR register
+
+Working with Timer Output Channels and STM32 Cube
+1) Initialize the TIMER output Compare Time base
+	HAL_TIM_OC_Init(TIM_HandleTypeDef *htim)
+2) Configure output channel of the timer
+	HAL_TIM_OC_ConfigChannel(TIM_HandleTypeDef *htim, TIM_OC_InitTypeDef* sConfig, uint32_t Channel)
+
+TIM_CNT_CLK = 25MHz
+TIM_CNT_CLK_PERIOD = 40ns
+Desire freq = 500Hz
+Time Period = 1/500 = 0.002s
+pulse duration = 0.001s
+toggling freq = 1kHz
+pulse = 25000
+
+HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_1)
+
+*********************************************************************************************************
+								Section 11: PWM (Pulse Width Modulation)
+*********************************************************************************************************
+
+Exercise:
+By using PWM mode, generate PWM signals of 25%, 45%, 75%, and 90% duty cycle on TIM2's channels.
+
+From Excel "Time Period Value Calculation":
+TIMx_CLK = 50MHz
+Prescaler = 4999
+CNT_CLK = 10kHz
+Period CNT_CLK = 100us
+Period Value (ARR) = 10000
+Time base req  = 1 second
+
+Exercise:
+Use Channel 1 in PWM mode (PA0) to adjust the brightness of LED. Ramps up (1sec) and ramps down (1sec).
+
+*********************************************************************************************************
+						Section 12: Controller Area Network (CAN) Fundamentals
+*********************************************************************************************************
+
+Controller Area Network
+. CAN Bus Protocol and its features (fundamentals)
+. Operating Principles of the CAN Bus
+. Different Message Formats
+. Working with STM32 bxCAN Peripherals
+. Various Examples
+
+Intro to CAN Bus
+. The Controller Area Network Protocol was originally developed during the late 1980's by the German company Robert Bosch for the automotive industry.
+. It is a multi-master serial communication bus whos basic design specification called for high speed, high noise-immunity and error-detection features.
+. CAN offers data communication up to 1Mbit/sec
+. The Error Confinement and the Error Detection features make it more reliable in noise-critical environments in the automotive industry.
+
+CAN's Most Attractive Features
+. Low cost
+. Extreme robustness
+. High data transmission speeds (up to 1Mbit/sec)
+. Reliability. Excellent error handling and Error Confinement abilities
+. Automatic re-transmission of faulty messages.
+. Automatic bus disconnection of nodes that are suspected to be physically faulty
+. Functional addressing - data messages do not contain source or destination addresses, only identifiers
+  relating to their function and/or priority.
+  
+Summary of CAN Features
+. It's a broadcast type of Bus (Unlike a traditional network such as USB or Ethernet or I2C, CAN does not send data point-to-point 
+  from node A to node B under the supervision of a central bus master)
+. All devices can hear the transmission
+. No way to send data specifically to a node by its address or something
+. All nodes will pick up the traffic on the bus
+The CAN standard defines a communication network that links all the nodes connected to a bus and enables them to talk with one another. There
+may or may not be a central control node, and nodes may be added at any time, even while the network is operating (hot-plugging).
+
+			Node:
+________________________________
+|	____________________		|
+|	|		MCU			|		|
+|	|   _______________ |		|
+|	|  |CAN Controller|	|		|
+|	|__|______________|_|		|
+|		   |     ^				|
+|	CAN_TX |     |	CAN_RX   Digital Signals
+|	  _____v_____|_______    	|	
+|	 |	CAN Transceiver  |		|
+|	 |___________________|		|
+|		   |     |				|
+|	CAN_H  |	 | CAN_L     Differential Signals
+|__________|_____|______________|
+		   |     |
+Both CAN Bus H Line and CAN Bus L Line are terminated by "Terminating Resistors" (typically 120 Ohm)
+
+
+CAN Single Ended vs Differential Signals
+
+Single Ended:
+V_low = 0V, V_high = 5V
+Pin goes high when transmitting logic '1' and low while transmitting logic '0'.
+
+Differential:
+Differential-mode voltage = V_DM = 10V
+Common-mode voltage = V_CM = 5V
+
+V+ and V- are differential signals.
+Logic 1:
+. First, V+ goes from low to high (rising edge) while V- similarly goes from high to low (falling edge).
+. The voltage difference (V+ - V-) = (+5V - (-5)V) = 10V
+Logic 0:
+. Next, V+ goes from high to low (falling edge) while V- similarly goes from low to high (rising edge).
+. The voltage difference (V+ - V-) = (-5V - 5V) = -10V.
+Both signals toggle repeatedly with opposite polarity.
+
+An advantage of differential pairs is that if noise is added to the signals, it affects both signals complementary (or equally),
+so it has passive noise cancellation.
+
+
+Understanding CAN Differential Signals
+Volts
+  5|
+   |
+3.5|_		_______  CAN_H
+   |   	   /	   \
+   |	  /			\
+2.5|=====<           >=====
+   |  ^	  \			/
+   |_ |	   \_______/ CAN_L
+1.5|  |        ^
+   |  |        |
+  0|__|________|___________________
+	  |		   |				time
+      |    Logic "0" Dominant (CAN_L)
+      |
+Logic "1" Recessive (CAN_L)
+
+Logic 1: CAN_H = 2.5V, CAN_L = 2.5V, diff = 0V (Recessive state because of the voltage diff of 0V)
+Logic 0: CAN_H = 3.5V, CAN_L = 1.5V, diff = 2V (Dominant state because of the voltage diff of 2V)
+
+. When you try to send logic '1', the CAN bus state will be recessive.
+	. Recessive State is a place on the CAN bus where potential difference between CAN_H and CAN_L is 0V.
+. When you try to send logic '0', the CAN bus state will be dominant.
+	. Dominant State is a place on the CAN bus where potential difference between CAN_H and CAN_L is ~2V.
+	
+SN65HVD233-HT 3.3V CAN Transceiver Functional Block Diagram
+
+CAN_TX -> Driver Input -> CANH & CANL
+CAN_TX <- Receiver Output <- CANH & CANL
+
+CAN_L is produced by negating (NOTing) the output of CAN_H. 
+Both signals are created by the Driver Input then looped back into the Receiver Output
+
+Since Dominant state of the bus means voltage diff of 2V, logic 0 (dominant) always overrides logic 1 (recessive) during data transfer.
+
+Truth Table:
+					Node A
+N			Dominant Recessive
+o Dominant 	dominant dominant
+d
+e Recessive dominant recessive
+B
+
+Nodes will continuously check the bus to see if its available by checking for the bus to be recessive. If another node is dominating the bus,
+all other nodes will know this and backoff from accessing the bus, because whenever a node transmits from the CAN tranceiver, it also feeds it 
+back ("senses") to the receiver.
+
+A node will keep sensing the bus until it senses "x amount" of recessive readings.
+
+CAN Signalling Summary
+. Signalling is differential which is where CAN derives its robust noise immunity and fault tolerance.
+. Balanced differential signalling reduces noise coupling and allows for high signalling rates over twisted-pair cable.
+. Balanced means that the current flowing in each signal line is equal but opposite in direction, resulting in a field-cancelling 
+  effect that is a key to low noise emissions.
+. The use of balanced differential receivers and twisted-pair cabling enhance the common-mode rejection and high noise immunity of a CAN bus.
+. The cable is specified to be a shielded or unshielded twister-pair cable with a 120-Ohm characteristic impedance (Zo)
+. The ISO 11898 Standard defines a single line of twister-pair cable, as the network topology shows, terminated at both ends with 120-Ohm resistors, 
+  which match the characteristic impedance of the line to prevent signal reflections.
+  
+*********************************************************************************************************
+									Section 13: CAN Frame Formats
+*********************************************************************************************************
+
+CAN Message Types
+. There are 4 different message types (or frames) in CAN protocol.
+Data Frame, Remote Frame, Error Frame, Overload Frame
+
+/////////////////Data Frame
+Most common message type in CAN Communication
+A node uses this frame to send a message to other nodes on the CAN bus.
+
+Standard CAN Format or CAN 2.0A:
+Start of Frame (SOF) = 0 (1-bit)
+Arbitration ID (12-bits)
+IDE bit (1-bit)
+Reserved bit (1-bit)
+Data Length Code (DLC) (4-bits)
+Data (0-8bytes) ***Max payload Size is actually 8-bytes***
+CRC (15 bit + CRC delimiter bit = 16-bits)
+Ack slot bit (1-bit)  //This ack slot bit is set to dominant by the receiving node, and is used to confirm if message was sent successfully
+Ack delimiter (1-bit)
+End of Frame (EOF) (7-bits)
+IFS[0:2] (3-bits)
+
+Arbitration Field
+. The Arbitration Field, which determines the proriority of the message when two or more nodes are contending for the bus. 
+  The Arbitration Field contains: For CAN 2.0A, an 11-bit Identifier and one bit, the RTR (Remote Transmission Request) bit, which is dominant for data frames.
+. Identifier establishes the priority of the message. The lower the binary value, the higher its priority.
+. A "Standard CAN Frame" has an 11-bit identifier (Arbitration ID)
+
+Standard CAN vs Extended CAN
+. The original spec is the Bosch spec version 2.0
+. Version 2.0 spec is divided into two parts
+	- Standard CAN (Version 2.0A). Uses 11 bit identifiers
+	- Extended CAN (Version 2.0B). Uses 29 bit identifiers
+. The difference between these two formats is that the length of bits, (i.e), the standard CAN Frame format supports 11-bit length for the identifier,
+  whereas the extended frame supports 29-bits length for the identifier, which is made up of 18-bit extension and an 11-bit identifier.
+. Most 2.0A controllers transmit and receive only Standard format messages.
+. 2.0B controllers can send and receive messages in both formats.
+. If you have a CAN network which consists of both 2.0A and 2.0B based CAN devices, and if you use extended frame format (29-bit identifiers),
+  then your network will not work, because 2.0A devices will generate an error.
+. 2.0B controllers are completely backward compatible with 2.0A controllers and can transmit and receive messages in either format.
+. 2.0A controller based devices are capable of transmitting and receiving only messages in 2.0A format (standard format). With this type of controller,
+  reception of any 2.0B message will flag an error.
+
+Extended Frame Format or CAN 2.0B:
+Start of Frame (SOF) = 0 (1-bit)
+Arbitration Field (11-bit ID + SRR bit + IDE bit + 18-bit ID + RTR bit)
+Control (r1 bit + r0 bit + DLC bits)
+Data Field (0-8Bytes)
+CRC Field (15-bits + delimiter bit = 16-bits)
+ACK (slot bit + delimiter bit = 2-bits)
+EOF
+Int
+Bus Idle
+
+The IDE bit differs CAN extended frame format and the CAN standard frame format wherein IDE is transmitted as dominant in an 11-bit frame case and
+recessive in a 29-bit frame case.
+
+RTR bit (Remote Transmission Request)
+. A dominant (logic 0), RTR bit indicates that the message is a Data Frame
+. A recessive (logic 1) value indicates that the message is a Remote Transmission Request (known as Remote Frame). A remote frame
+  is a request by one node for data from some other node on the bus. Remote frames do not contain a Data Field.
+ 
+DLC, DATA and CRC Fields
+. The 4-bit data length code (DLC) contains the number of bytes of data being transmitted.
+. The Data Field, which contains zero to eight bytes of data.
+. The CRC Field contains a 15-bit checksum calculated on most parts of the message. This checksum is used for error detection.
+
+ACK bit
+. As soon as CAN receiver starts receiving a frame, it also calculates the CRC and then it compares it with the CRC sent by the transmitter.
+. If the CRC match was successful, then the receiving node makes the bus state as dominant, exactly at the moment of the ACK slot, which 
+indicates to the transmitter that at least one node received the frame correctly. If the transmitter sees a recessive state of the bus at the ack slot, 
+then it understands that it's a NACK and retransmits the message (retry).
+. Receiver makes the bus state dominant at the ACK Slot Bit if frame reception is successful.
+
+Note:
+It is worth mentioning that the presence of an ACK bit on the bus does not mean that any of the intended devices has received the message.
+It just means that one or more nodes on the bus has received it correctly and Transmitter concludes that the message sent successfully.
+If the Transmitter sees a recessive state at the ACK slot, then it retransmits the message until it sees a dominant state. That's why
+the transmitter will keep sending the same message when there is only one node on the bus and no node to ACK the message.
+
+ACK Significance
+. Every node receiving an accurate message overwrites this recessive bit in the original message with a dominant bit, indicating an error-free
+  message has been sent. If a receiving ndoed detects an error then it leaves this bit recessive, it discards the message and the sending node
+  repeats the message after re-arbitration. In this way, each node acknowledges (ACK) the integrity of its data. ACK is 2-bits, one is the
+  acknowledgement bit and the second is a delimiter.
+. Because all receivers must participate in the acknowledgement algorithm regardless of whether the message is intended for them or not, an 
+  acknowledgement to the transmitter may occur even if the expected receiver is not present on the network.
+. This means that the CAN Acknowledgement does not guarantee that a data transfer has occured between the transmitter and a designated receiver.
+  It does not confirm that a requested action has been understood or performed. CAN Acknowledgement only confirms that all resident network
+  nodes agree that the CAN message did not violate any Data Link Layer rules.
+
+End of Frame and IFS
+End of Frame: 7 Recessive State
+IFS (Inter Frame Spacing): 3 Recessive state
+
+**Note: 10 recessive states (EOF + IFS) forms tail of a CAN frame, after this only a node who is listening to bus understands that the bus is idle.
+  Any dominant bit heard after IFS is considered as SOF (Start of Frame). Bus idles at high
+  
+SOF 
+SOF- The single dominant start of frame (SOF) bit (Low) marks the start of a message, and is used to synchronize the nodes on a bus after being idle.
+
+/////////////////CAN Remote Frame
+. The intended purpose of the remote frame is to solicit the transmission of data from another node.
+. The remote frame is similar to the data frame, with two important differences. First, the type of message is explicitly marked as a remote frame
+  by a recessive RTR bit in the arbitration field, and a secondly, there is no data.
+. If, say, node A transmits a Remote Frame with the Arbitration Field set to 123, then node B, if properly initialized, might respond with a Data
+  Frame with the Arbitration Field also set to 123.
+. Remote Frames can be used to implement request-response type communication between nodes.
+. Most CAN controllers can be programmed either to automatically respond to a Remote Frame.
+. "Consider this request and send me some data"
+
+*********************************************************************************************************
+									Section 14: CAN Bus Arbitration
+*********************************************************************************************************
+Bit-wise Arbitration:
+
+Bus Access from Multiple Nodes
+. The CAN communication protocol is a carrier-sense, multiple-access protocol with collision detection and arbitration on message priority (CSMA/CD+AMP)
+. CSMA means that each node on a bus must wait for a prescribed period of inactivity before attempting to send a message. CD+AMP means that collisions are
+resolved through a bit-wise arbitration, based on a preprogrammed priority of each message in the identifier field of a message.
+
+The higher priority identifier always wins bus access.
+
+Nodes		Arbitration ID
+Node-1		0x65D (110 0101 1101 b)
+Node-2		0x676 (110 0111 0110 b)
+Node-3		0x659 (110 0101 1001 b)
+
+All of these nodes try to access the CAN bus at the same time, but Node-3 wins the bus arbitration because it has the lowest 11-bit identifier.
+		    <---- Identifier ---->
+		SOF	10 9 8 7 6 5 4 3 2 1 0 RTR Control Data
+	   __    _ _     _   _ _ _ _ _  _
+Node-1   |_|    |_ _| |_|      Listen only (lost arbitration)
+       __    _ _     _ _ _ _ _ _ _  _
+Node-2   |_|    |_ _|    Listen only (lost arbitration)
+	   __    _ _     _   _ _     _
+Node-3   |_|    |_ _| |_|   |_ _| | _  Any Data
+
+          D  R R D D R D R R D D R  D
+  CANH    _      _ _   _     _ _    _
+ Bus     | | _ _|   |_| |_ _|   |_ | | Any Data
+ State   |_|	|_ _| |_|   |_ _|  |_|
+  CANL
+  
+ Node 2 out of arbitration and enters listen only mode (won't compete) because it transmitted a recessive state (bit 5) but finds bus state is 
+ dominant and understands that it lost the arbitration.
+ 
+ Node 1 out of arbitration and enters listen only mode (won't compete) because it transmitted a recessive state (bit 2) but finds bus state is 
+ dominant and understands that it lost the arbitration.
+ 
+ Node-3 wins arbitration.
+ 
+ Highest priority would be (0x000 or 000 0000 0000 b)
+ A dominant bit always overwrites a recessive bit on the CAN bus, and Node 3 won due to overwriting every recessive state that the other nodes 
+ attempted to write.
+ 
+*********************************************************************************************************
+									Section 15: STM32 bxCAN
+*********************************************************************************************************
+
+Exercise:
+Test CAN Tx and Rx functionality using STM32 CAN (bxCAN) loopback mode.
+
+Refer to bxCAN Ch.30 in reference manual.
+
+ST's bxCAN Controller
+. The bxCAN (basic xtended CAN) module handles the transmission and the reception of CAN messages fully autonomously.
+  Standard identifiers(11-bit) and extended identifiers(29-bit) are fully supported by the hardware.
+. 2 CAN Controllers are available CAN1 and CAN2
+	. If you want to use CAN2, you have to first enable CAN1 as well.
+. CAN1 is called Master bxCAN and CAN2 is slave
+. Both support CAN protocol versions 2.0A,B
+. Bit rates up to 1Mbit/sec
+. Three transmit mailboxes
+. Two receive FIFOs with three stages
+. 28 filter banks shared between CAN1 and CAN2
+
+What can an application do with bxCAN?
+. Configure CAN parameters such as: bit rate, bit timings, etc
+. Transmissions
+. Handle receptions
+. Manage interrupts
+. Get diagnostic information
+
+bxCAN block diagram
+Refer to RM: Fig.393 Dual CAN block diagram
+
+								CAN1(Master) with 512 bytes SRAM
+		Master Tx Mailboxes
+		Transmission Scheduler			Master Receive FIFO0	Master Receive FIFO1
+				|								^					^
+CAN1 			v								|					|
+     <--> Memory Access Controller --> 			   Acceptance Filters 
+CAN2            ^						Master Filters (0 to 27) Slave Filters (0 to 27)
+				|								|					|
+		Transmission Scheduler					v 					v
+		Slave Tx Mailboxes				Slave Receive FIFO0		Slave Receive FIFO1
+		
+
+*Note: CAN2 has no direct access to the SRAM memory
+
+BxCAN Test Modes:
+
+Silent Mode
+	. CAN_TX=1(recessive). Tx -> (CAN_Rx -> RX)
+	. Tx line is internally looped back to RX line.
+	. CAN Tx is held at recessive state
+	. bxCAN is able to receive valid frames
+	. It just listens and doesn't change the bus state by putting dominant bit
+	. Can be used as a sniffer which just analyzes the traffic on the bus.
+Loop Back Mode
+	. TX->(CAN_TX & RX). CAN_RX -> N.C.
+	. bxCAN can transmit frames on the bus.
+	. Also the frames are looped back to the RX line internally
+	. bxCAN will not listen to the bus, but just receives its own message which is looped back.
+	. loop back mode is provided for self test functions
+Silent + Loop Back Mode
+	. CAN_TX=1(recessive). CAN_RX -> N.C. TX->RX
+	. bxCAN controller is totally disconnected from the bus
+	. It neither transmits nor listens to the bus
+	. TX is internally looped back to the RX hence receives its own messages.
+
+CAN Bit Timing Calculation:
+www.bittiming.can-wiki.info
+
+CAN Bit Timings Configuration 
+<--------------One Bit-------------->
+<Sync | Prop-seg | Phase 1 | Phase 2>
+						   ^
+						   | Sampling point
+						   
+Each bit on the CAN bus is, for timing purposes, divided into 4 segments:
+1) Synchronization Segment
+2) Propagation Segment
+3) Phase Segment 1
+4) Phase Segment 2
+
+Width of these segments have to be adjusted properly to get desired bit rate on the CAN bus.
+Width of each segment is mentioned in terms of time quanta.
+The Time Quanta is the smallest time unit for all configuration values.
+
+CAN1 is hanging on APB1 bus. 
+SYSCLK = 50MHZ -> AHB Prescaler (/1) -> HCLK = 50MHz -> APB1 Prescaler (/2) -> PCLK1 = 25MHz
+CAN_prescaler = 1
+Duration of 1 time quanta (1TQ) = PCLK1 / CAN_prescaler = 0.04us or 40ns
+
+If you increase the bit duration by including more and more TQs for each segment, then you may minimize the transmission errors and
+the signal can be carried over longer distances but bus throughput decreases.
+
+From website www.bittiming.can-wiki.info for bxCAN,
+25MHz SYSCLK is not enough to achieve 1Mbit/sec max bitrate, but.. 
+
+50MHz SYSCLK is able to achieve max bitrate with the following settings:
+1Mbit/sec <-> CAN_prescaler = 5, num_TQ = 10, Seg1 = 8, Seg2 = 1, Sample point at 90.0, register CAN_BTR = 0x00070004.
+
+But instead it recommends (in yellow):
+125kBit/sec <-> CAN_prescaler = 25, num_TQ = 16, Seg1 = 13, Seg2 = 2, Sample point at 87.5, register CAN_BTR = 0x001c0018
+
+bxCAN Block Diagram (TX-Path)
+. Three transmit mailboxes are provided to the software for setting up messages.
+. The transmission Scheduler decides which mailbox has to be transmitted first.
+. In order to transmit a message, the application must select one empty transmit mailbox, set up the identifier, the data length code (DLC)
+  and the data before requesting the transmission.
+. Request Transmission by setting TXRQ bit in the control register.
+. Immediately after the TXRQ bit has been set, the mailbox enters pending state and waits to become the highest priority mailbox.
+. As soon as the mailbox has the highest priority it will be scheduled for transmission.
+. The transmission of the message of the scheduled mailbox will start (enter transmit state) when the CAN bus becomes idle.
+. Once the mailbox has successfully transmitted, it will become empty again.
+. The hardware indicates a successful transmission by setting the RQCP and TXOK bits in the CAN_TSR register.
+. If the transmission fails, this cause is indicated by the ALST bit in the CAN_TSR register in case of an Arbitration Lost,
+  and/or the TERR bit, in case of transmission error detection.
+  
+Figure 388. Transmit mailbox states (state machine)
+
+
+										 Mailbox has
+EMPTY       TXRQ=1     PENDING         highest priority     	    SCHEDULED
+RQCP=X   ------------> RQCP=0  -----------------------------------> RQCP=0
+TXOK=X				   TXOK=0  <----------------------------------- TXOK=0
+TME=1                  TME=0 		    Mailbox does not  			TME=0      
+						  \			 have highest priority		  /       ^  \ CAN Bus = IDLE
+						   \	ABRQ=1				   ABRQ=1	 /         \  \
+							\----------->   EMPTY	<-----------/	        \  \	TRANSMIT  transmit	  EMPTY
+											RQCP=1					Transmit \ 	v	RQCP=0    succeeded   RQCP=1
+											TXOK=0	 Transmit		failed		    TXOK=0    ----------> TXOK=1
+											TME=1	 failed			* ~NART		   	TME=0				  TME=1
+											  ^		 * ~NART						  |
+											  |---------------------------------------|
+														
+typedef struct
+{
+  uint32_t StdId;    /*!< Specifies the standard identifier.
+                          This parameter must be a number between Min_Data = 0 and Max_Data = 0x7FF. */
+
+  uint32_t ExtId;    /*!< Specifies the extended identifier.
+                          This parameter must be a number between Min_Data = 0 and Max_Data = 0x1FFFFFFF. */
+
+  uint32_t IDE;      /*!< Specifies the type of identifier for the message that will be transmitted.
+                          This parameter can be a value of @ref CAN_identifier_type */
+
+  uint32_t RTR;      /*!< Specifies the type of frame for the message that will be transmitted.
+                          This parameter can be a value of @ref CAN_remote_transmission_request */
+
+  uint32_t DLC;      /*!< Specifies the length of the frame that will be transmitted.
+                          This parameter must be a number between Min_Data = 0 and Max_Data = 8. */
+
+  FunctionalState TransmitGlobalTime; /*!< Specifies whether the timestamp counter value captured on start
+                          of frame transmission, is sent in DATA6 and DATA7 replacing pData[6] and pData[7].
+                          @note: Time Triggered Communication Mode must be enabled.
+                          @note: DLC must be programmed as 8 bytes, in order these 2 bytes are sent.
+                          This parameter can be set to ENABLE or DISABLE. */
+
+} CAN_TxHeaderTypeDef;
+
+Then call the API:
+HAL_CAN_AddTxMessage(CAN_HandleTypeDef *hcan, CAN_TxHeaderTypeDef *pHeader, uint8_t aData[] uint32_t *pTxMailbox)
+. This API will first find out which mailbox is free, it will then put that data into that mailbox, next it will trigger 
+  transmission, and finally let the API know which mailbox was used by updating the pTxMailbox variable. 
+  
+  
+Figure 384. bxCAN operating modes
+
+                            Reset
+!SLEEP.SYNC.!INRQ             |
+      ___________________	  v		_______________________
+    /  ------------------>	Sleep   <---------------------  \
+   | /						SLAK=1						   \ |
+   ||						INAK=0							||!SLEEP.INRQ.ACK
+   ||										SLEEP.!INRQ.ACK	||
+   || SLEEP.ACK												||	
+   ||														||		
+   ||														||
+   v|														||
+Normal				  	INRQ.ACK						Initialization
+SLAK=0  <---------------------------------------------	SLAK=0
+INAK=0  --------------------------------------------->	INAK=1
+					!INRQ.SYNC.!SLEEP
+
+After Reset state, the CAN Mode will be in Sleep mode and needs to be moved to Initialization mode by resetting/clearing the 
+Sleep bit (!SLEEP). ** This happens within HAL_CAN_Init() **
+After Initialization stage, CAN mode needs to move to Normal mode by using HAL_CAN_Start() -- Request leave initialization -- which clears the 
+INRQ bit.
+
+Loop Back mode connection (without transceiver)
+
+PA12 (CAN_TX) No connection
+PA11 (CAN_RX) -----[3.3kOhm]--- +vcc 3.3V
+
+Loop Back mode connection (with transceiver)
+		
+						 ^+vcc
+			   __________|_________
+	CAN_TX    | 				   |
+PA12 ---------|CAN_TX        CAN_H |-----------
+	    ->	  |     Transceiver    |    [ ] RL=120Ohm 
+			  |					   |     |    (internal, no need to add)
+PA11 ---------|CAN_RX        CAN_L |-----------
+               --------------------
+						 | 
+						 v GND
+						 
+In the code exercise, the logic analyzer shows a single CAN message being sent followed by a NACK when it returns to loopback.
+The Saleae Logic can decipher the CAN messages if given the correct CAN bitrate.
+
+This loopback mode is provided for self-test functions. To be independent of external events, the CAN core ignores acknowledge errors
+(no dominant bit sampled in the ack slot of a data/remote frame) in loopback mode.
+The autoretransmit initialization / bit modifies this behavior of retransmitting after getting a NACK. 
+
+Block Diagram for CAN TX and RX internal to controller
+
+																	 ____________
+																	|			 |
+		 |------>    TX    -----> Parallel to Serial Converter ---> |PA11     TX |<- CAN_TX
+		 |		  Mailbox(3)									    |			 |
+Processor|															|  I/O Pins  |
+		 |<-| FIFO 1 | <-|	Acceptance  |							|			 |
+		 |<-| FIFO 2 | <-| Filter banks | <- Serial to Parallel <-- |PA12	  RX |<- CAN_RX
+					     |	  (28)	    |		  Converter         |____________|
+						 
+Messages that dont meet the filtering rules (in the acceptance filter banks) will be discarded and not loaded into the FIFO to generate any interrupts.
+
+bxCAN Rx Path
+. Two receive FIFOs are used by each CAN Controller to store the incoming messages.
+. Three complete messages can be stored in each FIFO
+. The FIFOs are managed completely by hardware
+
+RX Filtering
+. The controller will read any frames it sees on the bus and hold them in a small FIFO memory. It will notify the host processor that this data is available
+  which the processor then reads from the controller.
+. The controller also contains a hardware filter mechanism that can be programmed to ignore and discard those CAN frames you do not want passed to the processor.
+  This saves processor overhead.
+. Acceptance filtering is introduced to manage the frame reception.
+
+Acceptance Filtering
+. There are 28 filter banks shared between Master bxCAN (CAN1) and slave bxCAN (CAN2).
+. Each Filter bank has 2, 32-bit associated filter registers
+. You can use filter banks to filter the incoming messages.
+
+						 --> FBx=0..27_R1(32-bit)
+Filter Bank x=0..27 ----|
+						 --> FBx=0..27_R2(32-bit)
+						 
+
+*********************************************************************************************************
+									Section 16: bxCAN Frame Filtering
+*********************************************************************************************************
+
+Frame acceptance rules: example
+1. Accept frames only if the first 3 msbs of the standard identifier are 1's e.g. 111xxxx         MASK MODE
+2. Accept frames only if first 3 msbs of the standard identifier are 0's and last 2 lsbs are 1's  MASK MODE
+3. Accept frames only if standard identifier value exactly = 0x65D or 0x651					      LIST/ID MODE
+4. Accept only Request frames																	  MASK MODE set RTR=1 in mask
+5. Accept only Extended ID frames																  MASK MODE set IDE=1 in mask
+6. Accept all frames 																			  Nothing Required.
+
+When using Mask Mode:
+FBx_R1(32-bit) is treated as the Identifier Register
+FBx_R2(32-bit) is treated as the Mask Register
+
+The acceptance rules are set in the Mask Register, while the message contents are put in the Identifier Register 
+to be compared with the Mask Register
+
+When using List/ID Mode:
+FBx_R1(32-bit) is treated as the Identifier Register-1
+FBx_R2(32-bit) is treated as the Identifier Register-2
+This mode is better when comparing the incoming message contents against an expected/known value.
+
+HAL_CAN_ConfigFilter(CAN_HandleTypeDef *hcan, CAN_FilterTypeDef *sFilterConfig)
+
+/**
+  * @brief  CAN filter configuration structure definition
+  */
+typedef struct
+{
+  uint32_t FilterIdHigh;          /*!< Specifies the filter identification number (MSBs for a 32-bit
+                                       configuration, first one for a 16-bit configuration).
+                                       This parameter must be a number between Min_Data = 0x0000 and Max_Data = 0xFFFF. */
+
+  uint32_t FilterIdLow;           /*!< Specifies the filter identification number (LSBs for a 32-bit
+                                       configuration, second one for a 16-bit configuration).
+                                       This parameter must be a number between Min_Data = 0x0000 and Max_Data = 0xFFFF. */
+
+  uint32_t FilterMaskIdHigh;      /*!< Specifies the filter mask number or identification number,
+                                       according to the mode (MSBs for a 32-bit configuration,
+                                       first one for a 16-bit configuration).
+                                       This parameter must be a number between Min_Data = 0x0000 and Max_Data = 0xFFFF. */
+
+  uint32_t FilterMaskIdLow;       /*!< Specifies the filter mask number or identification number,
+                                       according to the mode (LSBs for a 32-bit configuration,
+                                       second one for a 16-bit configuration).
+                                       This parameter must be a number between Min_Data = 0x0000 and Max_Data = 0xFFFF. */
+
+  uint32_t FilterFIFOAssignment;  /*!< Specifies the FIFO (0 or 1U) which will be assigned to the filter.
+                                       This parameter can be a value of @ref CAN_filter_FIFO */
+
+  uint32_t FilterBank;            /*!< Specifies the filter bank which will be initialized.
+                                       For single CAN instance(14 dedicated filter banks),
+                                       this parameter must be a number between Min_Data = 0 and Max_Data = 13.
+                                       For dual CAN instances(28 filter banks shared),
+                                       this parameter must be a number between Min_Data = 0 and Max_Data = 27. */
+
+  uint32_t FilterMode;            /*!< Specifies the filter mode to be initialized.
+                                       This parameter can be a value of @ref CAN_filter_mode */
+
+  uint32_t FilterScale;           /*!< Specifies the filter scale.
+                                       This parameter can be a value of @ref CAN_filter_scale */
+
+  uint32_t FilterActivation;      /*!< Enable or disable the filter.
+                                       This parameter can be a value of @ref CAN_filter_activation */
+
+  uint32_t SlaveStartFilterBank;  /*!< Select the start filter bank for the slave CAN instance.
+                                       For single CAN instances, this parameter is meaningless.
+                                       For dual CAN instances, all filter banks with lower index are assigned to master
+                                       CAN instance, whereas all filter banks with greater index are assigned to slave
+                                       CAN instance.
+                                       This parameter must be a number between Min_Data = 0 and Max_Data = 27. */
+
+} CAN_FilterTypeDef;
+
+
+*********************************************************************************************************
+									Section 17: CAN Interrupts
+*********************************************************************************************************
+
+bxCAN Interrupt Generation
+Refer RM: Figure 396. Event Flags and Interrupt Generation
+
+Transmit Interrupt IRQ  (CAN_TSR)  - From transmit mailboxes 0,1,2 becoming empty (RQCP0,1,2 bit is set)
+FIFO0 Interrupt IRQ		(CAN_RF0R) - Reception of a new message (FMP0 bits are not '00'), FIFO0 Full condition (FULL0 bit), FIFO0 Overrun condition (FOVR0 bit)
+FIFO1 Interrupt IRQ		(CAN_RF1R) - Reception of a new message (FMP1 bits are not '00'), FIFO1 Full condition (FULL1 bit), FIFO1 Overrun condition (FOVR1 bit)
+Status Change Error Interrupt (CAN_ESR and CAN_MSR) - Error condition (CAN_ESR), Wakeup condition (SOF monitored on CAN Rx Signal), Entry into sleep mode.
+
+BOFF (Bus-off flag in CAN_ESR register) - Node goes into passive mode.
+Depending on the ABOM bit in CAN_MCR, bxCAN will recover from Bus-Off either automatically (set) or on software request (clear) (after a recovery sequence).
+Both cases the bxCAN has to wait at least for the recovery sequence specified (128 occurences in 11 consecutive recessive bits on CAN_RX).
+In initialization mode, bxCAN does not monitor the CAN_RX signal, therefore it cannot complete the recovery sequence.
+To recover, bxCAN must be in normal mode.
+
+Exercise:
+Find out the bxCAN1 and bxCAN2 IRQ numbers for STM32F446RE MCU.
+> IRQ 19,20,21,22
+	HAL_NVIC_SetPriority(CAN1_TX_IRQn,15,0);
+	HAL_NVIC_SetPriority(CAN1_RX0_IRQn,15,0);
+	HAL_NVIC_SetPriority(CAN1_RX1_IRQn,15,0);
+	HAL_NVIC_SetPriority(CAN1_SCE_IRQn,15,0);
+	HAL_NVIC_EnableIRQ(CAN1_TX_IRQn);
+	HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
+	HAL_NVIC_EnableIRQ(CAN1_RX1_IRQn);
+	HAL_NVIC_EnableIRQ(CAN1_SCE_IRQn);
+
+Activating interrupt on peripheral side involves setting the bits in CAN_IER (TMEIE, FMPIE0, FFIE0, FOVIE0, FMPIE1, FFIE1, FOVIE1, EERIE, EWGIE, EPVIE, BOFIE, LECIE)
+This is done in HAL_CAN_ActivateNotification()
+
+CAN Scheduler decides which Mailbox callbacks to use based on availability.
+
+Check stm32f4xx_hal_can.c for callbacks
+
+Used in example project:
+void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan);
+void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan);
+void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan);
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+
+void CAN1_TX_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void CAN1_RX0_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void CAN1_RX1_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void CAN1_SCE_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+//Activate Interrupts by setting CAN_IER bits
+if(HAL_CAN_ActivateNotification(&hcan1, CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF) != HAL_OK) {
+	Error_handler();
+}
+*********************************************************************************************************
+									Section 17: CAN Interrupts
+*********************************************************************************************************
+
+CAN Normal Mode
+With Transceiver
+                         ^ VCC3.3V			CAN BUS				^ VCC3.3V
+   PA12   CAN_TX         |        CAN_H ------------- CAN_H		|			CAN_TX   PA12		------LED1
+    ------------>	Transceiver		RL=120		RL=120  	Transceiver	   <------------		------LED2
+N1 <------------    					|			|						------------>  N2	------LED3
+   PA11   CAN_RX		 |		  CAN_L ------------- CAN_L		|			CAN_RX	 PA11		------LED4
+	                     v GND 									v GND
+		
+. N1 sends a message (led number) using Data Frame for every 1sec to N2.
+. After the reception of message (led number) N2 has to glow the corresponding LED.
+. N1 also sends a Remote frame to request 2 bytes of data for every 4sec
+. N2 upon receiving the Remote frame should send back 2 bytes of data using Data Frame
+. Use Interrupt driven Code
+
+Timer6    						CAN1
+TIMER_Init()					CAN1_Init()
+HAL_TIM_Base_MspInit()			CAN1_FilterConfig()
+TIM6_DAC_IRQHandler()			HAL_CAN_MspInit()
+HAL_TIM_PeriodElapsedCallback()	HAL_CAN_XXX_Callback()
+								CAN1_XX_IRQ_Handler()
+N1 and N2 GPIO Inits
+
+N1 --PC13---Button
+
+   ---PC9---LED1
+N2 ---PC8---LED2
+   ---PB8---LED3
+   ---PC6---LED4
+
+*********************************************************************************************************
+							Section 18: CAN Normal Mode and Exercise
+*********************************************************************************************************
+Refer to Projects:
+CAN_NormalMode_2Nodes
+CAN_NormalMode_2Nodes_Nucleo-F746ZG
+
+Configured for 1Mbps speed between STM32 Nucleo-F446RE and STM32 Nucleo-F746ZG boards.
+
+*********************************************************************************************************
+									Section 19: Low Power Modes
+*********************************************************************************************************
+MCU Low Power Modes
+. A number of low-power features are available in the Cortex-Mx processor.
+. In addition, microcontroller vendors usually also implement a number of low power modes in their Cortex-Mx-based microcontrollers.
+  This we call as device specific low power modes or features.
+. Details for microcontroller-specific low-power features are usually available in user manuals or application notes available from the
+  microcontroller vendor websites.
+
+Low Power Modes:
+Processor Specific Low Power Modes
+	. ARM Cortex M4
+		. Normal Sleep
+			. SLEEPDEEP feature is RESET
+			. Instruction: WFI and WFE
+			. Feature: Sleep on exit
+		. Deep Sleep
+			. SLEEPDEEP feature is SET
+			. Instruction: WFI and WFE
+			. Feature: Sleep on exit
+MCU (Vendor Specific) Low Power Modes (e.g. ST)
+	. Additional sleep modes are introduced by MCU vendors using device-specific programmable registers.
+	. A microcontroller can be in Run mode or in Low Power mode.
+	. In Run mode, the processor will be clocked and it will be doing its normal operation and consuming the power for its operation.
+	. When a processor has nothing to do, it can be sent to low power mode, otherwise it will be in a busy idle loop wasting CPU cycles.
+
+Normal Sleep vs Deep Sleep
+. Inside the processor, the selection between normal sleep mode and deep sleep mode is defined by the SLEEPDEEP bit in the System Control Register.
+. Normal sleep mode stops the processor clock.
+. Deep sleep mode stops the system clock and switches off the PLL and flash memory.
+. The Exact behavior of Normal and Deep Sleep mode is Microcontroller vendor specific.
+. For more info about the behavior of the sleep modes check the documentation supplied by the device vendor.
+
+How to Enter Normal Sleep
+. SLEEPDEEP bit (SCB) of the ARM Cortex Mx processor must be reset.
+. Use instructions like WFI or WFE to trigger entering the sleep mode.
+. You can also use SLEEPONEXIT feature of the ARM Cortex Mx processor to enter into sleep mode.
+
+Summary: Entering Low Power Mode
+. In ARM Cortex Mx based processors, there are only 3 ways by which you can make a processor enter into the low power mode:
+	. Execution of a WFE instruction
+	. Execution of a WFI instruction
+	. Using the Sleep-On-Exit feature
+. If you enable the Sleep on Exit the processor enters sleep automatically when it exits ISR.
+. Lets explore Sleep-On-Exit feature, WFI, and WFE one by one.
+
+Enter SLEEP mode using Sleep-On-Exit feature
+. Sleep on exit is a feature given by ARM Cortex Mx processor
+. Remember, its not an instruction
+. When this feature is enabled, the processor automatically enters sleep mode when exiting an exception handler if no 
+  other exception is waiting to be processed.
+. It does not cause the processor to enter sleep if the exception handler is returning to another exception handler (nested interrupt)
+. SLEEPONEXIT bit in the SCR of the ARM Cortex Mx processor has to be set after all the initializations of your app.
+. No instruction is needed to enter sleep mode with this feature enabled.
+. When ISR finishes executing all of the instructions written, processor goes into sleep mode automatically without returning back to 
+  thread mode (No thread related un-stacking happens, because processor is not going back to thread mode).
+  
+When to use this?
+When your app does all its work in an interrupt handler, then while exiting ISR the Processor will automatically go to sleep to save power if enabled
+. Useful when a processor only runs during an interrupt service routine (ISR).
+. Ideal for interrupt driven applications to stay in sleep mode as often as possible.
+
+Note:
+In interrupt-driven apps, do not enable Sleep-On-Exit feature too early during the initialization. Otherwise if the processor receives an interrupt
+request during the init, it will enter sleep automatically after the interrupt handler executed, before the rest of the init completes.
+
+Exercise:
+Write an application in which TIM6 triggers Update interrupt for every 10ms and in the ISR of TIM6 send some data over UART2.
+. Measure the Current consumption without sleep mode.
+. Measure the Current consumption with sleep mode (enter sleep mode using SLEEPONEXIT feature)
+
+	. Reset -> Initialization -> Enable SLEEPONEXIT feature -> Start Timer -> Wait in while(1)
+	. Entry into TIM6 ISR -> UART2 data send -> Exit from ISR -> Sleeping
+	(Processor Mode: Run) for all states other than Sleeping (Processor Mode: Sleep)
+
+Waking up from SLEEPONEXIT
+. When the processor enter sleep mode using the Sleep-On-Exit feature, or executing the WFI instruction, the processor stops instruction execution,
+  enters sleep mode and wakes up when a higher priority interrupt request arrives and needs to be serviced. (This is what ARM says, but an MCU vendor may implement
+  this wakeup procedure differently, e.g. in ST's case the processor wakes up for any interrupt, i.e. priority dont care).
+. If the processor enters sleep in an exception handler, and if the newly arrived interrupt request has the same or lower priority compared to the
+  current exception, the processor will not wake up and interrupt will remain in pending state. (This is what ARM says, but the MCU vendor may implement
+  the wakeup procedure differently).
+. The processor can also be woken up by a halt request from the debugger or by reset.
+
+*********************************************************************************************************
+							Section 20: Current Reduction Tips and Tricks
+*********************************************************************************************************
+
+Tips to Reduce the Power Consumption
+. Stopping clock to the processor and to some or all the peripherals (clock gating)
+. Reducing clock frequency
+. Reducing voltage to various parts of the microcontroller
+. Turning off the power supply to some parts of the microcontroller
+. Keeping unused pins in the analog mode
+	. By default IO pins are in INPUT mode and CLOCKS disabled to their ports
+. Increasing UART baudrate
+
+
+
+Current Consumption at different configurations with Sleep Mode:
+UART2, TIM6, GPIO
+//USART2 USART2LPEN (Low Power USART2 Clock enable during sleep mode)
+
+(HCLK: 50MHz PLL)
+Without SLEEPONEXIT/WFI/WFE: 	11mA
+With SLEEPONEXIT/WFI/WFE: 		7.5mA
+
+(HCLK: 16MHz HSI + UART2 Baudrate 115200)
+With SLEEPONEXIT/WFI/WFE: 		3mA
+
+(HCLK: 16MHz HSI + UART2 Baudrate 230400)
+With SLEEPONEXIT/WFI/WFE: 		2.45mA
+
+(HCLK: 16MHz HSI + UART2 Baudrate 460800)
+With SLEEPONEXIT/WFI/WFE: 		2.35mA
+
+(HCLK: 16MHz HSI + UART2 Baudrate 921600)
+With SLEEPONEXIT/WFI/WFE: 		2.30mA
+
+(HCLK: 16MHz HSI + UART2 Baudrate 460800 + Disabling all peripherals of AHBx and APBx domain during sleep)
+With SLEEPONEXIT/WFI/WFE: 		2.06mA
+
+(HCLK: 16MHz HSI + UART2 Baudrate 460800 + Disabling all peripherals of AHBx and APBx domain during sleep + I/O Analog Mode)
+With SLEEPONEXIT/WFI/WFE: 		1.86mA
+
+
+STM32F446RE MCU IO Ports
+. 8 IO Ports
+  Each GPIO port is a collection of 16 IO pins
+  GPIOA, GPIOB, GPIOC, GPIOD, GPIOE, GPIOF, GPIOG, GPIOH
+. When clock is enabled for a particular GPIO port, all its associated pins will get activated and they will be in digital input mode 
+  and start draining some current.
+. If you have any unused pins then you can pull that pin to ground using pull-down resistor to save current consumption.
+  Alternatively, you could keep the unused pins in analog mode.
+  
+How long will your battery last?
+
+Let's say you are using a 9V battery for this. 
+9V battery typically comes with AH rating of 500mAH
+i.e. The battery can give 500mA of current ctns for 1 hour before going dead.
+With our measurements, depending on sleep mode configurations the application could last anywhere between 2-11days!
+
+*********************************************************************************************************
+										Section 21: WFI and WFE
+*********************************************************************************************************
+Understanding WFI instruction
+
+WFI (Wait for Interrupt)
+. It is a 16-bit Thumb instruction
+. When Cortex-MX (0,0+,3,4,7) processor execcutes a WFI instruction it stops executing instructions and enters sleep mode
+  (Clocks to the processor are stopped), until the arrival of an interrupt or if the processor enters a debug state.
+. Enter sleep unconditionally
+. Can be used with both normal sleep and deep sleep mode.
+. The WFI instruction is a Cortex-Mx instruction which cannot be directly accessed by ANSI C. The CMSIS (Cortex Microcontroller
+  Software Interface Standard) provides an intrinsic function to generate a WFI instruction and is supported by C compiler. If
+  a C compiler does not support the WFI intrinsic function, then the user will have to use assembly code to execute WFI instruction.
+
+Waking up from WFI
+. When processor goes to sleep executing WFI instruction in a thread mode, any interrupt request, debug request, or reset can wake up
+  the processor.
+. If the processor executes WFI instruction in an exception handler and enters sleep mode then only higher priority interrupt request
+  (> current level) can only wake up the processor. If the newly arrived interrupt request has the same or lower priority compared to
+  the current exception, the processor will not wake up and the newly issued interrupt will remain in pending state. (This is what ARM
+  says but MCU vendor may implement wakeup procedure differently)
+. The processor can also be woken up by a halt request from the debugger or by reset.
+
+WFI Summary
+
+					WFI Executed
+						 |
+	   no				 v              yes
+	 ----------- Is SLEEPDEEP set? -------------
+	|										 	|
+	|										 	|  
+	v											v
+Normal Sleep 								Deep Sleep 
+(Wait until interrupt) 					(Wait until interrupt)
+    |											|
+	|_________Interrupt/Debug Req/Halt__________|
+						|
+						v
+				Exit Sleep and Executed
+				  next instruction in
+					 Run mode
+					 
+Exercise: (WFI_button)
+. Write an app to send data over UART2 whenever button interrupt is received.
+. Measure the Current consumption without sleep mode
+	3.25 (not pressed) - 3.7mA (pressed)
+. Measure the Current consumption with sleep mode (enter sleep mode using WFI instruction)
+	1.5mA (not pressed) - 1.9mA (pressed)
+
+WFE (Wait for Event)
+. It is a 16 bit Thumb instruction.
+. Enter sleep conditionally.
+. Its intended usage is as part of a power saving strategy in spinlock loops in RTOS.
+. It is possible that execution of a WFE instruction will complete immediately without causing the processor.
+  to go into a low power (sleeping) state.
+. WFE success depends upon event register of the processor.
+
+Event Register of the Processor
+. Inside a Cortex-M processor, there is a single-bit event register.
+. This event register bit will be 0 after reset.
+. The event register is used to hold an event which happened in the past.
+. When set, an Event Register indicates that an event has occurred.
+. When any event occurs, this bit is set to 1.
+. When you execute WFE and if WFE sees that event register bit is 1, it makes it 0 and doesn't cause the processor to go to sleep.
+  (A WFE instruction clears the Event Register).
+. WFE succeeds (i.e. puts processor to sleep) only when event register bit is 0 at the time of executing the WFE instruction.
+. Software cannot read or write the value of the Event Register directly.
+. The event register can be set by any of the following events:
+	- An interrupt request arrives and needs servicing
+	- Exception entrance and exception exit
+	- New pending interrupts (only when SEVONPEND bit in SCR is set), even if the interrupts are disabled.
+	- An external event signal from on-chip hardware (MCU specific)
+	- Execution of an SEV (Send Event) instruction
+	- Debug event
+. When multiple events occur while the processor is awake, they will be treated as just one event because the event
+  register is only one bit.
+  
+Interrupt is used to service the Peripheral
+1. Data received from external word ->  2. Peripheral A (UART) -> Interrupt the processor -> Processor -> 3. Run ISR 
+
+Processor is in handler mode
+ISR {
+	Read data from peripheral and store it to memory
+}
+
+Event is used to inform the processor that certain event is happened in the peripheral which doesnt need attention.
+Ex. MCU wakes up, when RTC alarm event happens and transmits data over zigbee transceiver and goes back to slep until next alarm.
+
+WFE Summary
+
+					WFE Executed
+						 |
+						 v			yes		  Clear the event reg. and
+				Is event_reg set? ----------> proceed to next instruction
+						 | no					  in run mode
+						 v		        yes
+	 ----------- Is SLEEPDEEP set? -------------						
+	| 					                        |
+	|										 	|
+	|										 	|  
+	v											v
+Normal Sleep 								Deep Sleep 
+(Wait until event) 					(Wait until event)
+    |											|
+	|____Event/Interrupt Pend/Debug Req/Halt____|
+						|
+						v
+				Exit Sleep and Executed
+				  next instruction in
+					 Run mode
+
+Wakeup from WFE
+. When the WFE instruction is used to enter sleep, it can be woken up by
+	- The execution of an SEV(Send Event) instruction
+	- Any exception entering the Pending state if SEVONPEND in the System Control Register is set
+	- An asynchronous exception at a priority that preempts any currently active exceptions
+	- An event from another processor/peripheral
+. WFE can also be woken up by interrupt requests if they have a higher priority than the current interrupt's priority level.
+. The SEVONPEND feature can wake up the processor from WFE sleep even if the priority level of the newly pended interrupt
+  is at the same or lower level than the current interrupt. However, in this case, the processor will not execute the
+  interrupt handler and will resume program execution from the instruction following the WFE.
+
+WFI and WFE sleep wake-up behavior
+
+WFI behavior 					PRIMASK 	SEVONPEND 	Wake up		ISR Execution
+IRQ priority >  current level	0			N/A			Yes			Yes
+IRQ priority <= current level	0			N/A 		No			No
+IRQ priority >  current level	1			N/A			Yes			No
+IRQ priority <= current level	1			N/A			No			No
+
+WFE behavior					PRIMASK 	SEVONPEND 	Wake up		ISR Execution
+IRQ priority >  current level	0			0			Yes			Yes
+IRQ priority <= current level	0			0 			No			No
+IRQ priority >  current level	0			1			Yes			Yes
+IRQ priority <= current level	0			1			Yes			No
+	(or IRQ disabled)
+IRQ priority >  current level	1			0			No			No
+IRQ priority <= current level	1			0 			No			No
+IRQ priority >  current level	1			1			Yes			No
+IRQ priority <= current level	1			1			Yes			No
+
+Exercise: WFE_button
+. Write an app to send data over UART2 whenever button interrupt is received.
+. Measure the Current consumption without sleep mode
+	3.25 (not pressed) - 3.7mA (pressed)
+. Measure the Current consumption with sleep mode (enter sleep mode using WFI instruction)
+	1.5mA (not pressed) - 1.9mA (pressed)
+
+
+How to Generate Events in STM32 MCU
+1. Execute the SEV instruction
+	- Not possible if processor is sleeping
+2. Use Peripheral Interrupt as an event (other peripherals not listed in option #3)
+	- Make SEVONPEND bit as 1
+	- Disable peripheral interrupt in the NVIC
+	- Make peripheral issue an interrupt
+	- Applicable to all peripherals
+3. Use peripheral event (RTC, USB, GPIO)
+	- Applicable to some of the peripherals
+	
+In the Reference Manual (RM), under the Interrupts and Events section (CH10), EXTI block diagram
+
+Fig29. External Interrupt/Event Controller block diagram
+. It's shown that there are 23 lines that go to the NVIC interrupt controller (from Pending Request Register)
+. There's another block of the same controller that generates events (EVENTI 23 lines) (Pulse generator output connected to AND/OR gates with 
+  inputs from: Event Mask register, Software Interrupt Event Register (consider always 0, N/A), and Rising/Falling Trigger Selection Register)
+ 
+PA0,PB0,..,PH0 -> EXTI0 line
+PA1,PB1,..,PH1 -> EXTI1 line
+..
+PA15,PB15,..,PH15 -> EXTI15 line
+
+EXTI line 16  -> PVD output
+EXTI line 17  -> RTC Alarm event
+EXTI line 18  -> USB OTG FS Wakeup event
+EXTI line 20  -> USB OTG HS (configured in FS) Wakeup event
+EXTI line 21  -> RTC Tamper and TimeStamp events
+EXTI line 22  -> RTC Wakeup event
+
+Apart from RTC, USB, and GPIO peripherals, none of the other peripherals can generate an event.
+Other peripherals need to make use of Option #2 (Use Peripheral Interrupt as an event).
+
+In WFE exercise, using push button GPIO (EXTI13 (part of EXTI15_10_IRQn)) to trigger an event.
+
+Differences and Similarities of WFI and WFE
+Similarities:
+	. Wake up on Interrupt requests
+	. Wake up by debug events
+	. Can be used to produce normal or deep sleep
+Differences:
+	. WFI puts the processor immediately to sleep, whereas WFE puts the processor to sleep only if event register value is 0.
+	. No relation between event register and WFI, but WFE works alongside event register.
+	. New pending of a disabled interrupt can wake up the processor from WFE sleep if SEVONPEND is set.
+	. WFE can be woken up by an external event signal
+	
+When to use WFE and WFI
+
+Scenario: System with multiple processors (4 processors)
+
+								  EVENTI
+								|----------- Processor-2
+				EVENTO			| EVENTI
+Processor-1 --------------------|----------- Processor-3
+								| EVENTI
+								|----------- Processor-4
+	Shared Resource (S.R.)
+
+Let's say Processor-1 acquires the SR via a semaphore.
+Processor-2,3,4 tries to acquire the semaphore, but can't because processor 1 has it, 
+   so it can go to sleep here by using WFE (saving cycles between checking for semaphore availability)
+When processor 1 releases the semaphore, it executes the SEV (Send event) instruction which generates a pulse over the EVENTO line,
+   which travels to all other processors over the EVENTI line (waking them up).
+
+WFI could also be used here if separate GPIO lines are configured as interrupts to each individual processor (3 additional GPIOs in this case).
+Really doesn't make sense to use WFI here over WFE, but its possible. The Event wouldn't wake up the processors in WFI scenario.
+With WFE, there's no ISR processing, no stacking/unstacking, no GPIOs required.
+
+*********************************************************************************************************
+							Section 22: STM32 Low Power Modes and Voltage Domains
+*********************************************************************************************************
+Device Specific (MCU) Low Power Modes
+. Low Power modes of the MCU is further extended by the device vendor using Power modes given by ARM Cortex M Processor
+	. Within the Deep Sleep option, the MCU additionally gives STOP and Stand By modes (specific to vendor of MCU - STM32 F4x devices in this case)
+		. Could be additional modes here such as Ultra Low Power modes etc.
+		. Now our 3 modes are: Normal Sleep, DS (Deep Sleep) STOP, and DS (Deep Sleep) Stand By
+
+Refer to Table 15. of RM (Low-power mode summary)
+	
+Power Consumption (Most to Least):
+Run 	Sleep	STOP	STANDBY (lowest)
+
+Sleep: Cortex-M4 with FPU core stopped, peripherals kept running
+	- In Sleep mode, only the CPU is stopped
+	- All peripherals continue to operate and can wake up the CPU when an interrupt/event occurs
+	- You can always do additional settings to save some more power (like running CPU at lower clock, disabling peripheral clocks, etc)
+STOP: All clocks are stopped
+STANDBY: All clocks are stopped and +1.2V domain powered off
+
+
+STM32 MCU Voltage Domains:
+2 Voltage domains:
+VDD (3.3V) domain
+  & (1.2V) domain
+
+								Voltage Domains				
+							 ___________________________________________
+							| 											|
+							|	  VDDA domain (analog)					|
+						    |	 ______________							|
+(from 1.8V up to VDDA=VREF) |---|A/D converter |						|
+				  (VDD)VDDA |---|DAC		   |						|
+				  (VSS)VSSA |---|Temp. sensor  |						|
+							|   |Reset block   |						|
+							|	|PLLs__________|						|
+							|											|
+							|	       VDD domain		  1.2V domain	|
+							|	 _____________________   _____________	|
+						VSS	|---|Flash memory		  | |             |	|
+						VDD	|-.-|I/O ring			  | |    Core     |	|
+							| |	|Standby circuitry	  | |  Memories   |	|
+						VCAP|---|(wake-up logic, IWDG)| |   Digital	  |	|
+							| |	|Voltage regulator____| |_Peripherals_|	|
+							| |	 ________|								|
+							| |	| Low voltage regulator					|
+							| | |		   Backup domain				|
+							| . .	  _______________________			|
+						VBAT|-.\,----| 	LSE crystal/32KHz osc|			|
+							|		 |   RCC BDCR register	 |			|
+							|		 |  RTC and BKP registers|			|
+							|		 |______BKP SRAM_________|			|
+							|___________________________________________|
+				switch is connected to VDD by default			
+
+*********************************************************************************************************
+								Section 23: STM32 Voltage Regulator
+*********************************************************************************************************							
+STM32F4x Voltage Regulator
+
+1.7 to 3.3V
+VDD
+  []-------> Main Regulator --------> .	  1.2V
+	  |								   \.---->  Core, SRAM,
+	  |							  |-> .			  Digital
+      |----> Low-Power Regulator ------------>  Peripherals
+	  |
+	  |
+	  |   Vnn monitoring
+	  |         |
+	  |         v
+VBAT   ------->. 								   Backup
+  []---------->.\. --------------------------> Domain (RTC, BKP	
+											   SRAM and others)   
+
+Regulator modes
+
+Main Regulator					Low Power Regulator	
+	- Normal Mode					- Normal Mode
+	- Over Drive Mode				- Over Drive Mode
+	- Under Drive Mode				- Under Drive Mode
+	- Power Down					- Power Down
+You can select either MR or LPR by configuring the 
+LPDS bit in the PWR power control register (PWR_CR)
+
+Regulator Modes: Normal Mode
+. The CPU and core logic operate at maximum frequency at a given voltage scaling (scale 1, scale 2, or scale 3)
+. Voltage scaling can be configured by VOS bit in PWR_CR
+. You can use "Normal Mode" in RUN mode, STOP mode or in Sleep Mode.
+
+Regulator Modes: Over Drive Mode
+. Over Drive mode is used to run the CPU and Core logic at maximum possible frequency. In STM32F446RE MCU it is 180MHz.
+  The output voltage of the Main regulator will be more than typical 1.2V thus consuming more power of your application.
+. If your application demands using 180MHz, then you have to turn on the over drive mode.
+
+Regulator Modes: Under Drive Mode
+. The 1.2V domain is preserved in reduced leakage mode.
+. This mode cannot be used with RUN and SLEEP mode but only with STOP mode.
+. If the under-drive mdoe was enabled, it is automatically disabled after exiting Stop mode.
+. When the voltage regulator operates in Under-drive mode, an additional startup delay is induced when waking up from Stop mode.
+
+Regulator Modes: Power Down Mode
+. Power-down is used in Standby mode. The power-down mode is activated only when entering in Standby.
+. The regulator output is in high impedance inducing zero consumption. The contents of the registers and SRAM are lost.
+Voltage Scaling
+. There are 3 Voltage Scales available in STM32F4x MCU (Scale 1, Scale 2, Scale 3). The main goal of this is to
+  reduce the power consumption by controlling the output voltage regulator with respect to operating frequency.
+. Refer Table 16. General operating conditions in Datasheet.
+
+. The voltage scaling and over-drive mode are adjusted to fHCLK frequency as follows:
+Scale 3 for fHCLK <= 120MHz
+Scale 2 for 120MHz < fHCLK <= 144MHz
+Scale 1 for 144MHz < fHCLK <= 180MHz. The over-drive is only ON at 180MHz
+
+
+Summary: 
+Table 14. Voltage regulator configuration mode versus device operating mode
+
+Voltage regulator 	Run mode 	Sleep mode	Stop mode	Standby mode
+ configuration
+ 
+ Normal mode			MR			MR		MR or LPR		-
+ Low-voltage mode		-			-		MR or LPR		-
+ Over-drive mode		MR			MR			-			-	
+ Under-drive mode		-			-		MR or LPR		-
+ Power-down mode		-			-			-		   Yes
+
+*Overdrive mode is not available when VDD=1.8 to 2.1V
+* - means not available
+
+*********************************************************************************************************
+					Section 24: Current Measurement and datasheet comparison: RUN mode
+*********************************************************************************************************	
+Exercise: Current_Measurement_Run_Mode
+Take Current Consumption Measurement for:
+	- 180MHz HCLK, RUN mode, All Peripherals Enabled
+	- 180MHz HCLK, RUN mode, All Peripherals Disabled
+	- 60MHz HCLK, RUN mode, All Peripherals Enabled
+	- 60MHz HCLK, RUN mode, All Peripherals Disabled
+	Compare with Datasheet numbers
+
+CoreMark (an EEMBC Benchmark) www.eembc.org/coremark/faq.php
+
+*********************************************************************************************************
+					Section 25: Current Measurement and datasheet comparison: SLEEP mode
+*********************************************************************************************************		  
+Exercise: Current_Measurement_Sleep_Mode
+	- 180MHz HCLK, SLEEP mode, All Peripherals Enabled
+	- 180MHz HCLK, SLEEP mode, All Peripherals Disabled
+	- 60MHz HCLK, SLEEP mode, All Peripherals Enabled
+	- 60MHz HCLK, SLEEP mode, All Peripherals Disabled
+	Compare with Datasheet numbers
+
+CoreMark (an EEMBC Benchmark) www.eembc.org/coremark/faq.php
+
+*********************************************************************************************************
+					Section 26: Current Measurement and datasheet comparison: STOP mode
+*********************************************************************************************************		  
+CoreMark (an EEMBC Benchmark) www.eembc.org/coremark/faq.php
+
+How to put MCU in STOP mode?
+					SLEEPDEEP = 1
+						 |
+					0	 v		1        
+	 ------------------ PDDS -------------------						
+	| 		Power-down deepsleep bit            |
+	|										 	|  
+	v											v
+SLEEPONEXIT/WFI/WFE 					SLEEPONEXIT/WFI/WFE
+	|											|
+    v											v
+STOP Mode								  Standby Mode
+
+
+
+Voltage Regulator Settings in STOP Mode
+**Remember Voltage Regulator will not be OFF in STOP mode**
+
+      
+	 ------------------ MR/LPR -----------------						
+	| 								            |
+	|										 	|  
+	v											v
+Normal Mode								Under Drive Mode
+
+
+
+        	 ----- Voltage Regulator Normal Mode -------						
+        MR	| 			 	|		|		            | LPR
+         	|				|		|					|  
+        	v				|		|					v
+MR ON+ FLASH ON (FPDS=0)	|		|		LPR ON+ FLASH ON (FPDS=0)
+							|		|
+							|		|
+MR ON+ FLASH PD (FPDS=1) <--		 -->	LPR ON+ FLASH PD (FPDS=1)
+
+
+	 ---- Voltage Regulator Under Drive Mode ---						
+	| 								            |
+MR	| 										 	|  LPR
+	v											v
+MR UD+ FLASH PD (FPDS=X)				LPR UD+ FLASH PD (FPDS=X)
+Main regulator in						Low-power regulator in deepsleep 
+deepsleep under-drive mode				under-drive mode
+
+In Stop mode, the power consumption can be further reduced by using additional settings in the PWR_CR register. However this will
+induce an additional startup delay when waking up from Stop mode.
+
+Shorter Wakeup Time			    ------------------------------------------------>			Longer Wakeup Time
+Larger Current Consumption		------------------------------------------------>			Smaller Current Consumption
+										
+MR ON+ FLASH ON(FPDS=0)	       LPR ON+ FLASH ON (FPDS=0)          MR UD+ FLASH PD(FPDS=X)         STOP Sub modes
+	          MR ON+ FLASH PD(FPDS=1)            LPR ON+ FLASH PD(FPDS=1)			LPR UD+ FLASH PD(FPDS=x)
+			  
+Exercise: Current_Measurement_Stop_Mode
+. Test the Current Consumption in below STOP mode conditions
+	- STOP + MR ON + FLASH ON
+	- STOP + MR ON + FLASH Power Down
+	- STOP + LPR ON + FLASH ON
+	- STOP + LPR ON + FLASH Power Down
+	- STOP + MR Under Drive + Flash Power Down
+	- STOP + LPR Under Drive + Flash Power Down
+	Waking up using Button interrupt (EXTI)
+	
+Wakeup from STOP Mode
+. When exiting Stop mode by issuing an interrupt or a wakeup event, the HSI RC oscillator is selected as system clock
+. If the under-drive mode was enabled, it is automatically disabled after exiting Stop mode
+. When the voltage regulator operates in low-power or low voltage mode, an additional startup delay is incurred when waking
+  up from Stop mode.
+. When the voltage regulator operates in Under-drive mode, an additional startup delay is induced when waking up from Stop mode.
+. Wakeup latency Refer to Table 17: Stop operating modes in RM.
+
+Microcontroller Wake-Up Pins (PA0 = WKUP0, PC13 = WKUP1)
+
+					GPIO			Wakeup Pin
+Master Microcontroller --------------------> Slave Microcontroller
+
+GPIO pin of Master is connected to wakeup pin of slave. 
+When Master wants to talk to slave it asserts (rising edge) wakeup pin to make slave
+exit the sleep (STOP/STANDBY) mode.
+
+*********************************************************************************************************
+						Section 27: STM32 Backup SRAM and STANDBY MODE effect
+*********************************************************************************************************	
+Backup SRAM
+. Backup SRAM is part of the backup domain.
+. In STM32F446RE MCU, there is 4KBs of Backup SRAM
+. This is introduced in order to hold some data like the serial numbers, cryptographic keys, or any other application data,
+  even if the Vdd is removed (Supported by VBAT).
+. It can be considered as an internal EEPROM when VBAT is always present.
+. It is by default write protected (Actually all backup domain peipherals are write protected, you need to first get the
+  access in order to change any settings or content of the backup domain peripherals).
+. Dedicated voltage regulator called backup voltage regulator is used to preserve the contents of the backup SRAM
+  when in standby mode (if selected) or in VBAT modes.
+
+3 Different Types of MCU Resets:
+1) System Reset
+	. A system reset sets all registers to their reset values except the reset flags in the clock controller CSR
+	  register and the registers in the Backup domain
+	. A system reset is generated when one of the following events occur:
+		1) A low level on the NRST pin (external reset)
+		2) Window watchdog end of count condition (WWDG reset)
+		3) Independent watchdog end of count condition (IWDG reset)
+		4) A software reset (SW reset)
+		5) Low-power management reset
+2) Power Reset
+3) Backup Domain Reset
+
+Exercise: Backup SRAM
+. Write a program to measure the current consumption in STANDBY mode
+	- BKUP SRAM on and RTC off
+	- Observe the contents of BKUP SRAM before and after STANDBY mode
+	
+	
+	//Turn on the clocks in RCC register for backup SRAM and power controller block
+	__HAL_RCC_BKPSRAM_CLK_ENABLE();
+	__HAL_RCC_PWR_CLK_ENABLE();
+
+	//Enable write access to the backup domain
+	HAL_PWR_EnableBkUpAccess();
+
+	pBackupSRAMbase = (uint32_t*)BKPSRAM_BASE;
+
+	//Checking cause for Reset (either from pressing Reset button or due to Standby mode exit)
+	if(__HAL_PWR_GET_FLAG(PWR_FLAG_SB != RESET)) {
+
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB); //Clear Standby Flag
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU); //Clear Wakeup Flag
+
+		printmsg("Woke up from Standby Mode\r\n");
+		uint8_t data = (uint8_t)*pBackupSRAMbase;
+		if(data != 'H') {
+			printmsg("Backup SRAM data is lost\r\n");
+		} else {
+			printmsg("Backup SRAM data is safe\r\n");
+		}
+	} else {
+		for(uint32_t i = 0; i < (strlen(write_buf)+1); i++) {
+			//Increment base address by + i as each byte is stored
+			//Stores the characters "H e l l o" into the backup SRAM which persists after System Reset
+			*(pBackupSRAMbase+i) = write_buf[i];
+		}
+	}
+	
+	//Wait for button (PC13) to be pushed
+	printmsg("Press button to enter standby mode.\r\n");
+	while(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) != GPIO_PIN_RESET);
+
+	printmsg("Going to Standby mode\r\n");
+
+	//Enable Wakeup pin 1 (PA0) in PWR_CSR to be used for wakeup from Standby Mode (Can touch PA0 to VDD with jumper)
+	HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);
+
+	//Enable Backup Voltage Regulator
+	HAL_PWREx_EnableBkUpReg();
+
+	//Enter Standby Mode
+	HAL_PWR_EnterSTANDBYMode();
+
+	//PWR_CSR - SBF bit/flag (Standby flag) set by hardware and can only be cleared by a POR/PDR or by setting CSBF bit in PWR_CR
+
+*********************************************************************************************************
+								Section 28: RTC and RTC Calendar Block
+*********************************************************************************************************	
+RTC Intro
+
+What is "Real Time"?
+. A real-time clock (RTC) is a peripheral of the MCU that keeps track of the current time and date information.
+. The real-time clock (RTC) embedded in STM32 microcontrollers acts as an independent BCD timer.
+. Although RTCs are often used in personal computers, servers and embedded systems, they are also present in almost
+  any electronic device that requires accurate time keeping.
+. As long as the supply voltage remains in the operating range, the RTC never stops regardless of the device status 
+  (Run mode, low power mode, or under reset).
+
+RTC Main Features
+. Calendar with sub-seconds, seconds, minutes, hours (12h or 24h format), day (day of week), date (day of month), month and year.
+. Two programmable alarms with interrupt function. The alarms can be triggered by any combination of the calendar fields.
+. Automatic wakeup unit generating a periodic flag that triggers an automatic wakeup interrupt.
+. 20 backup registers (80 bytes). The backup registers are reset when a tamper detection event occurs.
+
+RTC Important Features:
+. RTC Calendar Unit
+	. A calendar keeps track of the time (hours, minutes and seconds) and date (day, week, month, year)
+	. Calendar comes with:
+		- sub-seconds (not programmable)
+		- seconds
+		- minutes
+		- hours in 12-hour or 24-hour format
+		- day of the week (day)
+		- day of the month (date)
+		- Month
+		- Year (starts at 2000)
+	. The STM32 RTC calendar is provided in BCD format
+	. Automatic management of 28-,29- (leap year), 30- and 31-day months
+	. RTC_DR (holds the data info) RTC_TR (holds the time info) RTC_SSR (holds sub-seconds)
+. RTC Alarm
+. RTC Tamper Detection
+. RTC Wakeup Unit
+
+BCD vs Binary
+Decimal		BDC			Binary
+0			0000		0000
+1			0001		0001
+2			0010		0010
+3			0011		0011
+9			1001		1001
+10			0001 0000	1010
+15			0001 0101	1101
+56			0101 1100	111000
+
+Example:
+- Program 2:40:58AM into RTC_TR
+- Program 12th June 2018 into RTC_DR
+
+BCD of 2 -> 0010
+BCD of 40 -> 0100 0000
+BCD of 58 -> 0101 1000
+BCD of 12 -> 0001 0010
+BCD of 6(june) -> 0110
+BCD of 2018 -> 18 -> 0001 1000
+
+RTC Block Diagram
+
+3 RTC Clock source inputs: LSE (32.768Hz), HSE_RTC (4MHz max), LSI (32kHz)
+Clock input then gets fed through a Smooth Calibration filter to become RTCCLK.
+
+RTCCLK is then fed to -> (Async. 7-bit prescaler RTC_PRER) -> Coarse Calibration Filter -> (Sync, 15-bit prescaler RTC_PRER) --(default frequency 1Hz)-> Calendar
+Calendar needs a 1Hz tickrate for timekeeping (1 second ticks), which the prescalers take care of.
+
+The RTC_WUTR (Wakeup Timer) compares the output of the Calendar with the Input Clock Source signal that is fed through a separate prescaler (WUCKSEL 16-bit wakeup auto-reload timer).
+
+Generating 1 Hz from different clock sources:
+
+	RTCCLK				Prescalers				ck_spre
+ Clock source	PREDIV_A[6:0]  PREDIV_S[12:0]
+HSE_RTC = 1MHz	124(div125)		7999(div8000)	  1Hz
+LSE = 32.768kHz	127(div128)		 255(div256)	  1Hz
+LSI = 32kHz(1)	127(div128)		 249(div250)	  1Hz
+LSI = 32kHz(2)	124(div125)		 295(div296)	  1Hz
+
+(1). For STM32L1xx, LSI=37kHz, but LSI accuracy is not suitable for calendar application.
+(2). For STM32F2xx and STM32F4xx, LSI=32kHz, but LSI accuracy is not suitable for calendar application.
+
+RTC and STM32 Cube
+1. RTC Clock Selection
+	//a. Turn on req clock (HSE/LSI/LSE)
+	HAL_RCC_OscConfig(RCC_OscInitTypeDef *RCC_OscInitStruct)
+	//b. Select RTCCLK source as HSE/LSI/LSE in RCC_BDCR register
+	HAL_RCCEx_PeriphCLKConfig(RCC_PeriphCLKInitTypeDef *PeriphClkInit)
+2. RTC Init
+	HAL_RTC_Init(RTC_HandleTypeDef *hrtc)
+3. RTC Set Time and Date
+4. RTC Get Time and Date
+5. RTC Set/Get Alarm
+6. RTC Deactivate Alarm
+7. RTC Set/Deactivate Wakeup Timer
+and various others.
+
+Exercise:
+. Write a program to set the current time, day and Date information into the RTC and then print back the Date, time, day info
+  via UART whenever user button is pressed.
+Case 1: Time format 12h
+Case 2: Time format 24h
+Case 3: Do a system reset and observe the effect on your configuration made to the RTC
+Case 4: See the effect on the RTC when microcontroller exits Standby mode.
+
+**Check stm32f4xx_hal_rtc.h for all structure definitions**
+
+*********************************************************************************************************
+									Section 29: RTC Alarm
+*********************************************************************************************************	
+RTC Alarm
+. STM32 RTC embeds two alarms, Alarm A and Alarm B, which are similar
+. An alarm can be generated at a given time and/or date programmed by the user
+
+						RTC Alarm Fields
+
+	  Alarm Date				          Alarm Time
+Day of Week 	Date		 AM/PM	hh	mm		 s		  ss
+      ^			 ^             ^     ^   ^       ^		  ^
+	  |__________|	           |_____|   |       |		  |
+		  Mask4			        Mask3	Mask2	Mask1	Maskss
+		    |_____________________|______|_______|        |
+			               |							  |
+						   v							  v
+						 RTC_ALRMAR					RTC_ALRMASSR
+						 
+Example of RTC Alarm Masking
+
+Example1:
+Set Alarm @ 23:15:07 Every day
+The above alarm means that,
+1. We want alarm everyday, so date or day are "don't-care" (mask with 1 for unwanted fields)
+2. RTC calendar must be configured in 24h format
+3. Alarm must be generated when calendar fields hh:mm:ss exactly match with configured alarm fields
+
+Mask4 (set to 1)
+Mask3 (set to 0 because hours field needs to be compared. AM/PM "don't-care" because 24h format)
+Mask2 (set to 0)
+Mask1 (set to 0)
+Maskss (set to 1 "don't-care")
+
+Example2:
+Set Alarm @8AM on Every Sunday
+The above alarm means that,
+1. We want alarm only on Sunday
+2. We are interested to compare day not date, so WDSEL bit of RTC_ALRMAR has to be 0.
+3. RTC calendar must be configured in 12h format
+4. Alarm minutes and seconds fields are "don't-care" (so just mask them for comparison)
+
+Mask4 (set to 0) WDSEL = 1 (means only day will be compared)
+Mask3 (set to 0)
+Mask2 (set to 1 "don't-care")
+Mask1 (set to 1 "don't-care")
+Maskss (set to 1 "don't-care")
+
+Example3:
+Set Alarm @XX:45:09
+The above alarm means that,
+1. We want alarm at 45 mins, 09 seconds every hour
+2. Hour field is "don't-care"
+3. Date/Day field is "don't-care"
+
+Mask4 (set to 1 "don't-care")
+Mask3 (set to 1 "don't-care")
+Mask2 (set to 0)
+Mask1 (set to 0)
+Maskss (set to 1 "don't-care")
+
+RTC Alarm and STM32 Cube APIs
+HAL_RTC_SetAlarm(RTC_HandleTypeDef*, RTC_AlarmTypeDef*, uint32_t)
+HAL_RTC_SetAlarmIT(RTC_HandleTypeDef*, RTC_AlarmTypeDef*, uint32_t)
+HAL_RTC_GetAlarm(RTC_HandleTypeDef*, RTC_AlarmTypeDef*, uint32_t, uint32_t)
+HAL_RTC_DeactivateAlarm(RTC_HandleTypeDef*, uint32_t)
+
+Exercise
+. Write a program to Set an Alarm @ xx:45:09
+	- An interrupt must be triggered during alarm
+	- Use buzzer (you can turn an LED instead) to indicate the alarm
+	- Configure the RTC calendar and Alarm in Button ISR
+
+*********************************************************************************************************
+									Section 30: RTC Interrupts
+*********************************************************************************************************
+Table 125. Interrupt control bits
+RTC generates interrupts for:
+Interrupt Event			Event Flag		Enable control bit	Exit Sleep mode	Exit Stop mode	Exit Standby mode
+. Alarm A				ALRAF			ALRAIE				yes				yes(1)			yes(1)
+. Alarm B				ALRBF			ALRBIE				yes				yes(1)			yes(1)
+. Wakeup				WUTF			WUTIE				yes				yes(1)			yes(1)
+. TimeStamp				TSF				TSIE				yes				yes(1)			yes(1)
+. Tamper1 detection		TAMP1F			TAMPIE				yes				yes(1)			yes(1)
+. Tamper2 detection(2)	TAMP2F			TAMPIE				yes				yes(1)			yes(1)
+1. Wakeup from STOP and Standby modes is possible only when the RTC clock source is LSE or LSI
+2. If RTC_TAMPER2 pin is present. Refer to datasheet pinout.
+
+IRQn 2	TAMP_STAMP (EXTI line 21)
+	Tamper and TimeStamp interrupts through the EXTI line
+IRQn 3  RTC_WKUP   (EXTI line 22)
+	RTC Wakeup interrupt through EXTI line				
+IRQn 41 RTC_Alarm  (EXTI line 17)
+	RTC Alarms (A and B)through EXTI line interrupt
+	
+	
+RTC						  EXTI 						    NVIC
+____					________					   _____
+	|__________________|________|_____________________|2
+	|TAMP_STAMP		   |		|EXTI 21			  |
+	|__________________|________|_____________________|3  IRQn   ---> Processor Core
+	|RTC_WKUP		   |		|EXTI 22			  |
+	|__________________|________|_____________________|41	
+____|RTC_Alarm_A   |   |________|EXTI 17			  |_____
+	 RTC_Alarm_B---/
+	 
+*********************************************************************************************************
+									Section 31: RTC Alarm Exercises
+*********************************************************************************************************
+Exercise: RTC_AlarmA
+. Write a program to Set an Alarm @ 12:00:15PM Every day
+	- An interrupt must be triggered during alarm
+	- Use buzzer (or turn on / toggle LED)
+	- Configure the RTC calendar and Alarm in Button ISR
+	
+Exercise: RTC_AlarmA_12h
+. Write a program to Set anw Alarm @ 8AM Every Sunday
+	- An interrupt must be triggered during alarm
+	- Use buzzer (or turn on / toggle LED)
+	- Configure the RTC calendar and Alarm in Button ISR
+
+Exercise:
+Write a program to wake up the MCU from STANDBY mode @23:15:30 every day
+	- Use RTC Alarm Event as the wakeup source
+	- Use buzzer (or turn on / toggle LED) to indicate STANDBY exit
+	
+Exercise:
+Write a program to wake up the MCU from STOP mode @23:15:30 every day
+	- Use RTC Alarm Event as the wakeup source
+	- Use buzzer (or turn on / toggle LED) to indicate STOP exit
+	
+RTC Timestamp Feature 
+
+Time-stamp event procedure
+
+Calendar Unit -> TimeStamp 
+
+Copy:
+RTC_TSTR = RTC_TR
+RTC_TSDR = RTC_DR
+RTC_TSSSR = RTC_SSR
+	
