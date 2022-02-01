@@ -1,0 +1,1 @@
+Udemy FastBit Mastering Microcontroller and Embedded Driver Development (MCU1) course projects. Various course examples as well as a library containing peripheral drivers written from scratch for STM32F446RE MCU. Used STM32CubeIDE and STM32CubeProgrammer. Be sure to exclude all examples but the desired one from build.
