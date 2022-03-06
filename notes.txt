@@ -2542,4 +2542,6370 @@ Copy:
 RTC_TSTR = RTC_TR
 RTC_TSDR = RTC_DR
 RTC_TSSSR = RTC_SSR
-	
+
+
+
+///////////////////////////////////// Workspace /////////////////////////////////////
+
+common amongst all projects:
+///////////////////////////// it.c /////////////////////////////////
+extern CAN_HandleTypeDef hcan1;
+extern UART_HandleTypeDef huart2;
+extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim6;
+extern RTC_HandleTypeDef hrtc;
+
+extern void CAN1_Tx(uint8_t remote);
+
+void SysTick_Handler(void) {
+
+	HAL_IncTick();
+	HAL_SYSTICK_IRQHandler();
+}
+
+void USART2_IRQHandler(void) {
+
+	HAL_UART_IRQHandler(&huart2);
+}
+
+void CAN1_TX_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void CAN1_RX0_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void CAN1_RX1_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void CAN1_SCE_IRQHandler(void) {
+
+	HAL_CAN_IRQHandler(&hcan1);
+}
+
+void TIM2_IRQHandler(void) {
+
+	HAL_TIM_IRQHandler(&htim2);
+}
+
+void TIM6_DAC_IRQHandler(void) {
+
+	HAL_TIM_IRQHandler(&htim6);
+}
+
+void EXTI15_10_IRQHandler(void) {
+
+	HAL_TIM_Base_Start_IT(&htim6);
+	HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_13);
+}
+
+void RTC_Alarm_IRQHandler(void) {
+
+	HAL_RTC_AlarmIRQHandler(&hrtc);
+}
+
+///////////////////////////// msp.c /////////////////////////////////
+void HAL_MspInit(void) {
+	/* Low level processor specific inits */
+
+	//1. Set up the priority grouping of the arm cortex mx processor
+	HAL_NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4); //not required, as this will set to default setting
+
+	//2. Enable the required system exceptions of the arm cortex mx processor
+	//System Control Block (SCB) -> System Handler Control and State Register (SHCSR)
+	SCB->SHCSR |= (0x7 << 16);  //Set bits 16,17,18 (MEMFAULTENA, BUSFAULTENA, USGFAULTENA)
+
+	//3. Configure the priority for the system exceptions
+	HAL_NVIC_SetPriority(MemoryManagement_IRQn, 0, 0);
+	HAL_NVIC_SetPriority(BusFault_IRQn, 0, 0);
+	HAL_NVIC_SetPriority(UsageFault_IRQn, 0, 0);
+	//HAL_Init() in main.c already takes care of SysTick_IRQn priority setting
+}
+
+void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
+
+	GPIO_InitTypeDef gpio_uart;
+
+	/* Low level inits of the USART2 peripheral */
+
+	//1. Enable the required peripheral clock for the USART2 and GPIOA peripherals
+	__HAL_RCC_USART2_CLK_ENABLE();
+	__HAL_RCC_USART2_CLK_SLEEP_DISABLE(); //automatically disables/reenables UART2 clock during sleep and active periods.
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	//2. Pin muxing configurations
+	gpio_uart.Pin = GPIO_PIN_2; //USART2_TX
+	gpio_uart.Mode = GPIO_MODE_AF_PP;
+	gpio_uart.Pull = GPIO_PULLUP;
+	gpio_uart.Speed = GPIO_SPEED_FREQ_LOW;
+	gpio_uart.Alternate = GPIO_AF7_USART2;
+	HAL_GPIO_Init(GPIOA, &gpio_uart);
+
+	gpio_uart.Pin = GPIO_PIN_3; //USART2_RX
+	HAL_GPIO_Init(GPIOA, &gpio_uart);
+
+	//3. Enable the peripheral IRQ in the NVIC
+	HAL_NVIC_EnableIRQ(USART2_IRQn);
+
+	//4. Set the priorities based on application needs
+	HAL_NVIC_SetPriority(USART2_IRQn, 0, 0);
+}
+
+void HAL_CAN_MspInit(CAN_HandleTypeDef *hcan) {
+	GPIO_InitTypeDef GPIO_initstruct;
+
+	__HAL_RCC_CAN1_CLK_ENABLE();
+
+	//PA11 CAN1_RX
+	//PA12 CAN1_TX
+	GPIO_initstruct.Pin = GPIO_PIN_11 | GPIO_PIN_12;
+	GPIO_initstruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_initstruct.Pull = GPIO_NOPULL;
+	GPIO_initstruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_initstruct.Alternate = GPIO_AF9_CAN1;
+	HAL_GPIO_Init(GPIOA, &GPIO_initstruct);
+}
+
+void HAL_TIM_Base_MspInit(TIM_HandleTypeDef *htim) {
+	//1. Enable TIM6 Clock
+	__HAL_RCC_TIM6_CLK_ENABLE();
+
+	//2. Enable TIM6 IRQ
+	HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+
+	//3. Setup TIM6_DAC_IRQn priority
+	HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 15, 0);
+}
+
+void HAL_TIM_IC_MspInit(TIM_HandleTypeDef *htim) {
+
+	GPIO_InitTypeDef tim2ch1_gpio;
+
+	//1. Enable TIM2 and GPIOA peripheral clocks
+	__HAL_RCC_TIM2_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	//2. Configure gpio PA0 to behave as TIM2 Channel 1 with AF1 mode
+	tim2ch1_gpio.Pin = GPIO_PIN_0;
+	tim2ch1_gpio.Mode = GPIO_MODE_AF_PP;
+	tim2ch1_gpio.Alternate = GPIO_AF1_TIM2;
+	HAL_GPIO_Init(GPIOA, &tim2ch1_gpio);
+
+	//3. Enable the IRQ of TIM2
+	HAL_NVIC_EnableIRQ(TIM2_IRQn);
+
+	//4. Configure the priority for the IRQ of TIM2
+	HAL_NVIC_SetPriority(TIM2_IRQn, 15, 0);
+}
+
+void HAL_TIM_OC_MspInit(TIM_HandleTypeDef *htim) {
+
+	GPIO_InitTypeDef tim2OC_ch_gpios;
+
+	//1. Enable TIM2 and GPIOA peripheral clocks
+	__HAL_RCC_TIM2_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+
+	//2. Configure gpios PA0,1 to behave as TIM2 Channel 1,2 with AF1 mode
+	tim2OC_ch_gpios.Pin = GPIO_PIN_0 | GPIO_PIN_1;
+	tim2OC_ch_gpios.Mode = GPIO_MODE_AF_PP;
+	tim2OC_ch_gpios.Pull = GPIO_NOPULL;
+	tim2OC_ch_gpios.Speed = GPIO_SPEED_FREQ_LOW;
+	tim2OC_ch_gpios.Alternate = GPIO_AF1_TIM2;
+	HAL_GPIO_Init(GPIOA, &tim2OC_ch_gpios);
+
+	//**Conflict with PA2 and PA3 as they are already used by USART2 peripheral**
+	//So we'll use PB10 and PB2 for TIM2 Channel 3,4 with AF1 mode
+	tim2OC_ch_gpios.Pin = GPIO_PIN_2 | GPIO_PIN_10;
+	tim2OC_ch_gpios.Mode = GPIO_MODE_AF_PP;
+	tim2OC_ch_gpios.Pull = GPIO_NOPULL;
+	tim2OC_ch_gpios.Speed = GPIO_SPEED_FREQ_LOW;
+	tim2OC_ch_gpios.Alternate = GPIO_AF1_TIM2;
+	HAL_GPIO_Init(GPIOB, &tim2OC_ch_gpios);
+
+	//3. Enable the IRQ of TIM2
+	HAL_NVIC_EnableIRQ(TIM2_IRQn);
+
+	//4. Configure the priority for the IRQ of TIM2
+	HAL_NVIC_SetPriority(TIM2_IRQn, 15, 0);
+}
+
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef *htim) {
+
+	GPIO_InitTypeDef tim2PWM_ch_gpios;
+
+	//1. Enable TIM2 and GPIOA peripheral clocks
+	__HAL_RCC_TIM2_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+
+	//2. Configure gpios PA0,1 to behave as TIM2 Channel 1,2 with AF1 mode
+	tim2PWM_ch_gpios.Pin = GPIO_PIN_0 | GPIO_PIN_1;
+	tim2PWM_ch_gpios.Mode = GPIO_MODE_AF_PP;
+	tim2PWM_ch_gpios.Pull = GPIO_NOPULL;
+	tim2PWM_ch_gpios.Speed = GPIO_SPEED_FREQ_LOW;
+	tim2PWM_ch_gpios.Alternate = GPIO_AF1_TIM2;
+	HAL_GPIO_Init(GPIOA, &tim2PWM_ch_gpios);
+
+	//**Conflict with PA2 and PA3 as they are already used by USART2 peripheral**
+	//So we'll use PB10 and PB2 for TIM2 Channel 3,4 with AF1 mode
+	tim2PWM_ch_gpios.Pin = GPIO_PIN_2 | GPIO_PIN_10;
+	tim2PWM_ch_gpios.Mode = GPIO_MODE_AF_PP;
+	tim2PWM_ch_gpios.Pull = GPIO_NOPULL;
+	tim2PWM_ch_gpios.Speed = GPIO_SPEED_FREQ_LOW;
+	tim2PWM_ch_gpios.Alternate = GPIO_AF1_TIM2;
+	HAL_GPIO_Init(GPIOB, &tim2PWM_ch_gpios);
+
+	//3. Enable the IRQ of TIM2
+	HAL_NVIC_EnableIRQ(TIM2_IRQn);
+
+	//4. Configure the priority for the IRQ of TIM2
+	HAL_NVIC_SetPriority(TIM2_IRQn, 15, 0);
+}
+
+void HAL_RTC_MspInit(RTC_HandleTypeDef *hrtc) {
+
+	//RTC is a special case, you don't need to enable a peripheral clock, because it belongs to the backup domain
+	//RTC gets its signal directly from the oscillators (LSI/LSE/HSE) and works during Sleep/Standby/Stop modes
+	//All clocks are off during Stop mode, but RTC still works!
+	RCC_OscInitTypeDef RCC_OscInitStruct;
+	RCC_PeriphCLKInitTypeDef RCC_RTCPeriClkInit;
+
+	//1. Turn on the LSE
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE;
+	RCC_OscInitStruct.LSEState = RCC_LSE_ON;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+	if(HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+		Error_handler();
+	}
+
+	//2. Select LSE as RTCCLK
+	RCC_RTCPeriClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC;
+	RCC_RTCPeriClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
+	if(HAL_RCCEx_PeriphCLKConfig(&RCC_RTCPeriClkInit) != HAL_OK) {
+		Error_handler();
+	}
+
+	//3. Enable the RTCCLK
+	__HAL_RCC_RTC_ENABLE(); //Calendar starts ticking
+
+	//4. Enable the RTC Alarm IRQ in the NVIC
+	HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(RTC_Alarm_IRQn);
+}
+
+//or
+//RTC_Demo_App
+void HAL_RTC_MspInit(RTC_HandleTypeDef *hrtc) {
+
+	//RTC is a special case, you don't need to enable a peripheral clock, because it belongs to the backup domain
+	//RTC gets its signal directly from the oscillators (LSI/LSE/HSE) and works during Sleep/Standby/Stop modes
+	//All clocks are off during Stop mode, but RTC still works!
+	RCC_OscInitTypeDef RCC_OscInitStruct;
+	RCC_PeriphCLKInitTypeDef RCC_RTCPeriClkInit;
+
+#ifdef RTC_CLOCK_SOURCE_LSE
+	RCC_OscInitStruct.OscillatorType =  RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_LSE;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+	RCC_OscInitStruct.LSEState = RCC_LSE_ON;
+	RCC_OscInitStruct.LSIState = RCC_LSI_OFF;
+	if(HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK){
+		Error_Handler();
+	}
+
+	RCC_RTCPeriClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC;
+	RCC_RTCPeriClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
+	if(HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
+		Error_Handler();
+	}
+
+#elif defined (RTC_CLOCK_SOURCE_LSI)
+	RCC_OscInitStruct.OscillatorType =  RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_LSE;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+	RCC_OscInitStruct.LSIState = RCC_LSI_ON;
+	RCC_OscInitStruct.LSEState = RCC_LSE_OFF;
+	if(HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+		Error_handler();
+	}
+
+	RCC_RTCPeriClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC;
+	RCC_RTCPeriClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
+	if(HAL_RCCEx_PeriphCLKConfig(&RCC_RTCPeriClkInit) != HAL_OK) {
+		Error_handler();
+	}
+#else
+	#error Please select the RTC Clock source inside the main.h file
+#endif /* RTC_CLOCK_SOURCE_LSE */
+
+	/* Enable RTC Clock */
+	__HAL_RCC_RTC_ENABLE();
+}
+
+///////////////////////////// main.h /////////////////////////////////
+#include "stm32f4xx_hal.h"
+
+void Error_handler(void);
+
+#define SYS_CLOCK_FREQ_50MHZ 50
+#define SYS_CLOCK_FREQ_84MHZ 84
+#define SYS_CLOCK_FREQ_120MHZ 120
+
+#define LED1_PORT GPIOC
+#define LED2_PORT GPIOC
+#define LED3_PORT GPIOB
+#define LED4_PORT GPIOC
+
+#define LED1_PIN_NO GPIO_PIN_9
+#define LED2_PIN_NO GPIO_PIN_8
+#define LED3_PIN_NO GPIO_PIN_8
+#define LED4_PIN_NO GPIO_PIN_6
+
+#define FALSE 0
+#define TRUE 1
+
+#define RTC_ASYNC_PREDIV  0x7F
+#define RTC_SYNC_PREDIV   0x00FF
+//#define RTC_CLOCK_SOURCE_LSE
+#define RTC_CLOCK_SOURCE_LSI
+*********************************************************************************************************
+										BkupSRAM_Standby
+*********************************************************************************************************
+
+///////////////////////////// main.c /////////////////////////////////
+#include "main.h"
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	uint32_t* pBackupSRAMbase = 0;
+	char write_buf[] = "Hello";
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+
+	//Turn on the clocks in RCC register for backup SRAM and power controller block
+	__HAL_RCC_BKPSRAM_CLK_ENABLE();
+	__HAL_RCC_PWR_CLK_ENABLE();
+
+	//Enable write access to the backup domain
+	HAL_PWR_EnableBkUpAccess();
+
+	pBackupSRAMbase = (uint32_t*)BKPSRAM_BASE;
+
+	//Checking cause for Reset (either from pressing Reset button or due to Standby mode exit)
+	if(__HAL_PWR_GET_FLAG(PWR_FLAG_SB != RESET)) {
+
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB); //Clear Standby Flag
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU); //Clear Wakeup Flag
+
+		printmsg("Woke up from Standby Mode\r\n");
+		uint8_t data = (uint8_t)*pBackupSRAMbase;
+		if(data != 'H') {
+			printmsg("Backup SRAM data is lost\r\n");
+		} else {
+			printmsg("Backup SRAM data is safe\r\n");
+		}
+	} else {
+		for(uint32_t i = 0; i < (strlen(write_buf)+1); i++) {
+			//Increment base address by + i as each byte is stored
+			//Stores the characters "H e l l o" into the backup SRAM which persists after System Reset
+			*(pBackupSRAMbase+i) = write_buf[i];
+		}
+	}
+
+	//Wait for button (PC13) to be pushed
+	printmsg("Press button to enter standby mode.\r\n");
+	while(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) != GPIO_PIN_RESET);
+
+	printmsg("Going to Standby mode\r\n");
+
+	//Enable Wakeup pin 1 (PA0) in PWR_CSR to be used for wakeup from Standby Mode (Can touch PA0 to VDD with jumper)
+	HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);
+
+	//Enable Backup Voltage Regulator
+	HAL_PWREx_EnableBkUpReg();
+
+	//Enter Standby Mode
+	HAL_PWR_EnterSTANDBYMode();
+
+	while(1)
+	{}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef buttongpio;
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_INPUT;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										CAN_LoopBack
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void CAN1_Init(void);
+void CAN_Filter_Config(void);
+void CAN1_Tx(void);
+void CAN1_Rx(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+CAN_HandleTypeDef hcan1;
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	UART2_Init();
+	CAN1_Init();
+	CAN_Filter_Config();
+
+	if(HAL_CAN_Start(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+	CAN1_Tx();
+	CAN1_Rx();
+
+
+	while(1) {
+
+	}
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void CAN1_Init(void) {
+
+	hcan1.Instance = CAN1;
+	hcan1.Init.Mode = CAN_MODE_LOOPBACK;
+	hcan1.Init.AutoBusOff = ENABLE;
+	hcan1.Init.AutoRetransmission = ENABLE;
+	hcan1.Init.AutoWakeUp = DISABLE;
+	hcan1.Init.ReceiveFifoLocked = DISABLE;
+	hcan1.Init.TimeTriggeredMode = DISABLE;
+	hcan1.Init.TransmitFifoPriority = DISABLE;
+
+	//Settings related to CAN bit timings
+	hcan1.Init.Prescaler = 5;
+	hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+	hcan1.Init.TimeSeg1 = CAN_BS1_8TQ;
+	hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
+
+	if(HAL_CAN_Init(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+}
+
+void CAN_Filter_Config(void) {
+	CAN_FilterTypeDef can1_filter_init;
+
+	can1_filter_init.FilterActivation = ENABLE;
+	can1_filter_init.FilterBank = 0;
+	can1_filter_init.FilterFIFOAssignment = CAN_RX_FIFO0;
+	can1_filter_init.FilterIdHigh = 0x0000;
+	can1_filter_init.FilterIdLow = 0x0000;
+	can1_filter_init.FilterMaskIdHigh = 0x0000;
+	can1_filter_init.FilterMaskIdLow = 0x0000;
+	can1_filter_init.FilterMode = CAN_FILTERMODE_IDMASK;
+	can1_filter_init.FilterScale = CAN_FILTERSCALE_32BIT;
+
+	if(HAL_CAN_ConfigFilter(&hcan1, &can1_filter_init) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN1_Tx(void) {
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t message[5] = {'H','E','L','L','O'};
+	char msg[50];
+
+	TxHeader.DLC = 5;
+	TxHeader.StdId = 0x65D;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, message, &TxMailbox) != HAL_OK) {
+		Error_handler();
+	}
+	//Polling / Blocking Statement
+	while(HAL_CAN_IsTxMessagePending(&hcan1, TxMailbox));
+
+	sprintf(msg, "Message Transmitted\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void CAN1_Rx(void) {
+	CAN_RxHeaderTypeDef RxHeader;
+	uint8_t rcvd_msg[5];
+	char msg[50];
+
+	//Polling / Blocking Statement
+	//Waiting for at least one message to enter the CAN_RX_FIFO0
+	while(!HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0));
+
+	if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
+		Error_handler();
+	}
+
+	sprintf(msg, "Message Received : %s\r\n", rcvd_msg);
+
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										CAN_LoopBack_IT
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void CAN1_Init(void);
+void CAN_Filter_Config(void);
+void CAN1_Tx(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+CAN_HandleTypeDef hcan1;
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	UART2_Init();
+	CAN1_Init();
+	CAN_Filter_Config();
+
+	//Activate Interrupts by setting CAN_IER bits
+	if(HAL_CAN_ActivateNotification(&hcan1, CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Start CAN
+	if(HAL_CAN_Start(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+	CAN1_Tx();
+
+
+	while(1) {
+
+	}
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void CAN1_Init(void) {
+
+	hcan1.Instance = CAN1;
+	hcan1.Init.Mode = CAN_MODE_LOOPBACK;
+	hcan1.Init.AutoBusOff = ENABLE;
+	hcan1.Init.AutoRetransmission = ENABLE;
+	hcan1.Init.AutoWakeUp = DISABLE;
+	hcan1.Init.ReceiveFifoLocked = DISABLE;
+	hcan1.Init.TimeTriggeredMode = DISABLE;
+	hcan1.Init.TransmitFifoPriority = DISABLE;
+
+	//Settings related to CAN bit timings
+	hcan1.Init.Prescaler = 5;
+	hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+	hcan1.Init.TimeSeg1 = CAN_BS1_8TQ;
+	hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
+
+	if(HAL_CAN_Init(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+}
+
+void CAN_Filter_Config(void) {
+	CAN_FilterTypeDef can1_filter_init;
+
+	can1_filter_init.FilterActivation = ENABLE;
+	can1_filter_init.FilterBank = 0;
+	can1_filter_init.FilterFIFOAssignment = CAN_RX_FIFO0;
+	can1_filter_init.FilterIdHigh = 0x0000;
+	can1_filter_init.FilterIdLow = 0x0000;
+	can1_filter_init.FilterMaskIdHigh = 0x0000;
+	can1_filter_init.FilterMaskIdLow = 0x0000;
+	can1_filter_init.FilterMode = CAN_FILTERMODE_IDMASK;
+	can1_filter_init.FilterScale = CAN_FILTERSCALE_32BIT;
+
+	if(HAL_CAN_ConfigFilter(&hcan1, &can1_filter_init) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN1_Tx(void) {
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t message[5] = {'H','E','L','L','O'};
+
+	TxHeader.DLC = 5;
+	TxHeader.StdId = 0x65D;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, message, &TxMailbox) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M0\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M1\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M2\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+
+	CAN_RxHeaderTypeDef RxHeader;
+	uint8_t rcvd_msg[5];
+	char msg[50];
+
+	if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
+		Error_handler();
+	}
+
+	sprintf(msg, "Message Received : %s\r\n", rcvd_msg);
+
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"CAN Error Detected\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+									CAN_NormalMode_2Nodes
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM6_Init(void);
+void CAN1_Init(void);
+void CAN_Filter_Config(void);
+void CAN1_Tx(void);
+void Send_response(uint32_t StdId);
+void LED_Manage_Output(uint8_t led_no);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+CAN_HandleTypeDef hcan1;
+TIM_HandleTypeDef htim6;
+CAN_RxHeaderTypeDef RxHeader;
+uint8_t req_counter = 0;
+uint8_t led_no = 0;
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_84MHZ);
+	GPIO_Init();
+	UART2_Init();
+	TIM6_Init();
+	CAN1_Init();
+	CAN_Filter_Config();
+
+	//Activate Interrupts by setting CAN_IER bits
+	if(HAL_CAN_ActivateNotification(&hcan1, (CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF)) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Start CAN
+	if(HAL_CAN_Start(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	ledgpio.Pin = GPIO_PIN_8;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &ledgpio);
+
+	ledgpio.Pin = GPIO_PIN_6 | GPIO_PIN_8 | GPIO_PIN_9;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &ledgpio);
+
+	ledgpio.Pin = GPIO_PIN_13;
+	ledgpio.Mode = GPIO_MODE_IT_FALLING;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &ledgpio);
+
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM6_Init(void) {
+
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 4999;
+	htim6.Init.Period = 10000-1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN1_Init(void) {
+
+	hcan1.Instance = CAN1;
+	hcan1.Init.Mode = CAN_MODE_NORMAL;
+	hcan1.Init.AutoBusOff = ENABLE;
+	hcan1.Init.AutoRetransmission = ENABLE;
+	hcan1.Init.AutoWakeUp = DISABLE;
+	hcan1.Init.ReceiveFifoLocked = DISABLE;
+	hcan1.Init.TimeTriggeredMode = DISABLE;
+	hcan1.Init.TransmitFifoPriority = DISABLE;
+
+	//Settings related to CAN bit timings (500kbps)
+	hcan1.Init.Prescaler = 3;
+	hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+	hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
+	hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
+
+	if(HAL_CAN_Init(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+}
+
+void CAN_Filter_Config(void) {
+
+	CAN_FilterTypeDef can1_filter_init;
+
+	can1_filter_init.FilterActivation = ENABLE;
+	can1_filter_init.FilterBank = 0;
+	can1_filter_init.FilterFIFOAssignment = CAN_RX_FIFO0;
+	can1_filter_init.FilterIdHigh = 0x0000;
+	can1_filter_init.FilterIdLow = 0x0000;
+	can1_filter_init.FilterMaskIdHigh = 0x01C0;
+	can1_filter_init.FilterMaskIdLow = 0x0000;
+	can1_filter_init.FilterMode = CAN_FILTERMODE_IDMASK;
+	can1_filter_init.FilterScale = CAN_FILTERSCALE_32BIT;
+
+	if(HAL_CAN_ConfigFilter(&hcan1, &can1_filter_init) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN1_Tx(void) {
+
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t message;
+
+	TxHeader.DLC = 1;
+	TxHeader.StdId = 0x65D;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+
+	message = ++led_no;
+
+	if(led_no == 4) {
+		led_no = 0;
+	}
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &message, &TxMailbox) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M0\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M1\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M2\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+
+	uint8_t rcvd_msg[8];
+	char msg[50];
+
+	if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(RxHeader.StdId == 0x65D && RxHeader.RTR == 0) {
+		//Data frame sent by n1 to n2
+		LED_Manage_Output(rcvd_msg[0]);
+		sprintf(msg, "Message Received : #%x\r\n", rcvd_msg[0]);
+
+	} else if(RxHeader.StdId == 0x651 && RxHeader.RTR == 1) {
+		//Remote frame sent by n1 to n2
+		Send_response(RxHeader.StdId);
+		return;
+
+	} else if(RxHeader.StdId == 0x651 && RxHeader.RTR == 0) {
+		//Data frame reply from n2 to n1
+		sprintf(msg, "Reply Received : #%x\r\n", ((rcvd_msg[0] << 8) | rcvd_msg[1]));
+	}
+
+	//Send message to the UART (TeraTerm)
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"CAN Error Detected\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t message; //no meaning for data frame
+
+	if(req_counter == 4) {
+		//N1 sending Remote frame to N2
+		TxHeader.DLC = 2; //N1 demanding a reply of 2 bytes
+		TxHeader.StdId = 0x651;
+		TxHeader.IDE = CAN_ID_STD;
+		TxHeader.RTR = CAN_RTR_REMOTE;
+
+		if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &message, &TxMailbox) != HAL_OK) {
+			Error_handler();
+		}
+		req_counter = 0;
+	} else {
+		CAN1_Tx();
+		req_counter++;
+	}
+	message = ++led_no;
+
+	if(led_no == 4) {
+		led_no = 0;
+	}
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); //Toggle onboard LED
+}
+
+void LED_Manage_Output(uint8_t led_no) {
+
+	switch(led_no) {
+	case 1:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_RESET);
+		break;
+	case 2:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_RESET);
+		break;
+	case 3:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_RESET);
+		break;
+	case 4:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_SET);
+		break;
+	default:
+		break;
+	}
+}
+
+void Send_response(uint32_t StdId) {
+
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t response[2] = {0xAB, 0xCD};
+
+	TxHeader.DLC = 2;
+	TxHeader.StdId = StdId;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, response, &TxMailbox) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+								CAN_NormalMode_2Nodes_Nucleo-F746ZG
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM6_Init(void);
+void CAN1_Init(void);
+void CAN_Filter_Config(void);
+void CAN1_Tx(void);
+void Send_response(uint32_t StdId);
+void LED_Manage_Output(uint8_t led_no);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+CAN_HandleTypeDef hcan1;
+TIM_HandleTypeDef htim6;
+CAN_RxHeaderTypeDef RxHeader;
+uint8_t req_counter = 0;
+uint8_t led_no = 0;
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_84MHZ);
+	GPIO_Init();
+	UART2_Init();
+	TIM6_Init();
+	CAN1_Init();
+	CAN_Filter_Config();
+
+	//Activate Interrupts by setting CAN_IER bits
+	if(HAL_CAN_ActivateNotification(&hcan1, (CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF)) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Start CAN
+	if(HAL_CAN_Start(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	ledgpio.Pin = GPIO_PIN_8;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &ledgpio);
+
+	ledgpio.Pin = GPIO_PIN_6 | GPIO_PIN_8 | GPIO_PIN_9;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &ledgpio);
+
+	ledgpio.Pin = GPIO_PIN_13;
+	ledgpio.Mode = GPIO_MODE_IT_FALLING;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &ledgpio);
+
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM6_Init(void) {
+
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 4999;
+	htim6.Init.Period = 10000-1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN1_Init(void) {
+
+	hcan1.Instance = CAN1;
+	hcan1.Init.Mode = CAN_MODE_NORMAL;
+	hcan1.Init.AutoBusOff = ENABLE;
+	hcan1.Init.AutoRetransmission = ENABLE;
+	hcan1.Init.AutoWakeUp = DISABLE;
+	hcan1.Init.ReceiveFifoLocked = DISABLE;
+	hcan1.Init.TimeTriggeredMode = DISABLE;
+	hcan1.Init.TransmitFifoPriority = DISABLE;
+
+	//Settings related to CAN bit timings (1Mbps)
+	hcan1.Init.Prescaler = 3;
+	hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+	hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
+	hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
+
+	if(HAL_CAN_Init(&hcan1) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN_Filter_Config(void) {
+
+	CAN_FilterTypeDef can1_filter_init;
+
+	can1_filter_init.FilterActivation = ENABLE;
+	can1_filter_init.FilterBank = 0;
+	can1_filter_init.FilterFIFOAssignment = CAN_RX_FIFO0;
+	can1_filter_init.FilterIdHigh = 0x0000;
+	can1_filter_init.FilterIdLow = 0x0000;
+	//Check 4m:00s on course lesson 150 for explanation of 0x01CO
+	can1_filter_init.FilterMaskIdHigh = 0x01C0;
+	can1_filter_init.FilterMaskIdLow = 0x0000;
+	can1_filter_init.FilterMode = CAN_FILTERMODE_IDMASK;
+	can1_filter_init.FilterScale = CAN_FILTERSCALE_32BIT;
+
+	if(HAL_CAN_ConfigFilter(&hcan1, &can1_filter_init) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void CAN1_Tx(void) {
+
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t message;
+
+	TxHeader.DLC = 1;
+	TxHeader.StdId = 0x65D;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+
+	message = ++led_no;
+
+	if(led_no == 4) {
+		led_no = 0;
+	}
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &message, &TxMailbox) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M0\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M1\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"Message Transmitted:M2\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+
+	uint8_t rcvd_msg[8];
+	char msg[50];
+
+	if(HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(RxHeader.StdId == 0x65D && RxHeader.RTR == 0) {
+		//Data frame sent by n1 to n2
+		LED_Manage_Output(rcvd_msg[0]);
+		sprintf(msg, "Message Received : #%x\r\n", rcvd_msg[0]);
+
+	} else if(RxHeader.StdId == 0x651 && RxHeader.RTR == 1) {
+		//Remote frame sent by n1 to n2
+		Send_response(RxHeader.StdId);
+		return;
+
+	} else if(RxHeader.StdId == 0x651 && RxHeader.RTR == 0) {
+		//Data frame reply from n2 to n1
+		sprintf(msg, "Reply Received : #%x\r\n", ((rcvd_msg[0] << 8) | rcvd_msg[1]));
+	}
+
+	//Send message to the UART (TeraTerm)
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan) {
+
+	char msg[50];
+	sprintf(msg,"CAN Error Detected\r\n");
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t message; //no meaning for data frame
+
+	if(req_counter == 4) {
+		//N1 sending Remote frame to N2
+		TxHeader.DLC = 2; //N1 demanding a reply of 2 bytes
+		TxHeader.StdId = 0x651;
+		TxHeader.IDE = CAN_ID_STD;
+		TxHeader.RTR = CAN_RTR_REMOTE;
+
+		if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &message, &TxMailbox) != HAL_OK) {
+			Error_handler();
+		}
+		req_counter = 0;
+	} else {
+		CAN1_Tx();
+		req_counter++;
+	}
+	message = ++led_no;
+
+	if(led_no == 4) {
+		led_no = 0;
+	}
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); //Toggle onboard LED
+}
+
+void LED_Manage_Output(uint8_t led_no) {
+
+	switch(led_no) {
+	case 1:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_RESET);
+		break;
+	case 2:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_RESET);
+		break;
+	case 3:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_RESET);
+		break;
+	case 4:
+		HAL_GPIO_WritePin(LED1_PORT, LED1_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_PORT, LED2_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED3_PORT, LED3_PIN_NO, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED4_PORT, LED4_PIN_NO, GPIO_PIN_SET);
+		break;
+	default:
+		break;
+	}
+}
+
+void Send_response(uint32_t StdId) {
+
+	CAN_TxHeaderTypeDef TxHeader;
+	uint32_t TxMailbox;
+	uint8_t response[2] = {0xAB, 0xCD};
+
+	TxHeader.DLC = 2;
+	TxHeader.StdId = StdId;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, response, &TxMailbox) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+									Current_Measurement_Run_Mode
+*********************************************************************************************************
+STMicroelectronics Demo Application
+Most relevant files:
+main.c
+main.h
+pwr_modes.c
+pwr_modes.h
+
+*********************************************************************************************************
+									Current_Measurement_Sleep_Mode
+*********************************************************************************************************
+STMicroelectronics Demo Application
+Most relevant files:
+main.c
+main.h
+pwr_modes.c
+pwr_modes.h
+
+*********************************************************************************************************
+								Current_Measurement_Standby_Mode
+*********************************************************************************************************
+STMicroelectronics Demo Application
+Most relevant files:
+main.c
+main.h
+pwr_modes.c
+pwr_modes.h
+
+*********************************************************************************************************
+									Current_Measurement_Stop_Mode
+*********************************************************************************************************
+STMicroelectronics Demo Application
+Most relevant files:
+main.c
+main.h
+pwr_modes.c
+pwr_modes.h
+
+*********************************************************************************************************
+										HSE_SYSCLK_8MHz
+*********************************************************************************************************
+#include <string.h>
+#include <stdio.h>
+#include "main.h"
+
+#define TRUE 	1
+#define	FALSE 	0
+
+void UART2_Init(void);
+void Error_handler(void);
+
+
+UART_HandleTypeDef huart2;
+
+int main(void) {
+
+	//By default, micro-controller uses HSI for SYSCLK.
+	//This program configures SYSCLK to use HSE at 8MHz with HCLK at 4MHz, and PCLK1 and PCLK2 both at 2MHz.
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	char msg[100];
+
+	HAL_Init();
+
+	memset(&osc_init,0,sizeof(osc_init));
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_BYPASS;
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+			 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+	clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
+	clk_init.AHBCLKDivider = RCC_SYSCLK_DIV2;
+	clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+	clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+	if(HAL_RCC_ClockConfig(&clk_init, FLASH_ACR_LATENCY_0WS) != HAL_OK) {
+		Error_handler();
+	}
+
+	/* ------------------ SYSCLK is now SOURCED by HSE ------------------ */
+
+	__HAL_RCC_HSI_DISABLE(); //saves some current
+
+	/* Modify SYSTICK Configuration */
+
+	//HCLK = 4MHz
+	//0.25us = 1 tick
+	//1ms = (HCLK_freq / 1000)ticks = (4000000/1000)ticks
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+
+	UART2_Init();
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "SYSCLK : %ld\r\n", HAL_RCC_GetSysClockFreq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "HCLK : %ld\r\n", HAL_RCC_GetHCLKFreq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "PCLK1 : %ld\r\n", HAL_RCC_GetPCLK1Freq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "PCLK2 : %ld\r\n", HAL_RCC_GetPCLK2Freq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	while(1);
+
+	return 0;
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										PLL_SYSCLK_HSE
+*********************************************************************************************************
+#include <string.h>
+#include <stdio.h>
+#include "main.h"
+
+#define TRUE 	1
+#define	FALSE 	0
+
+void UART2_Init(void);
+void Error_handler(void);
+void SystemClock_Config_HSE(uint8_t clock_freq);
+
+
+UART_HandleTypeDef huart2;
+
+int main(void) {
+
+	char msg[100];
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	UART2_Init();
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "SYSCLK : %ldHz\r\n", HAL_RCC_GetSysClockFreq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "HCLK : %ldHz\r\n", HAL_RCC_GetHCLKFreq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "PCLK1 : %ldHz\r\n", HAL_RCC_GetPCLK1Freq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "PCLK2 : %ldHz\r\n", HAL_RCC_GetPCLK2Freq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+
+	//Refer to reference manual (HCLK Wait States Latency)
+	uint32_t FLatency = 0;
+
+	//Using HSE to derive PLL in this example:
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE; //set to HSI by default
+	osc_init.HSIState = RCC_HSE_BYPASS;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE; //assuming HSE = 8MHz
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 8;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;			//HCLK = 50MHz
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;			//PCLK1 = 25MHz
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;			//PCLK2 = 25MHz
+
+			FLatency = FLASH_ACR_LATENCY_1WS;
+			break;
+		}
+
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 8;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;			//HCLK = 84MHz
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;			//PCLK1 = 42MHz
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;			//PCLK2 = 42MHz
+
+			FLatency = FLASH_ACR_LATENCY_2WS;
+			break;
+		}
+
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 8;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;			//HCLK = 120MHz
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;			//PCLK1 = 30MHz
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;			//PCLK2 = 60MHz
+
+			FLatency = FLASH_ACR_LATENCY_3WS;
+			break;
+		}
+
+		//Maximum capacity of HCLK for STM32F446RE is 180MHz
+		//Extra steps required for this:
+		//1. Power Scale 1(VOS[1:0] bits in PWR_CR register = 0x10), Regulator ON
+		//2. Over-drive ON
+		case SYS_CLOCK_FREQ_180MHZ: {
+
+			//Enable the clock for the Power Controller
+			__HAL_RCC_PWR_CLK_ENABLE();
+			//Set regulator Voltage Scale as 1
+			__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+			//Turn on Over-drive mode of the voltage regulator
+			__HAL_PWR_OVERDRIVE_ENABLE();
+
+			osc_init.PLL.PLLM = 8;
+			osc_init.PLL.PLLN = 360;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;			//HCLK = 180MHz
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;			//PCLK1 = 45MHz
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2; 			//PCLK2 = 90MHZ
+
+			FLatency = FLASH_ACR_LATENCY_5WS;
+			break;
+		}
+		default:
+			break;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, FLatency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Systick config
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										PLL_SYSCLK_HSI
+*********************************************************************************************************
+#include <string.h>
+#include <stdio.h>
+#include "main.h"
+
+#define TRUE 	1
+#define	FALSE 	0
+
+void UART2_Init(void);
+void Error_handler(void);
+void SystemClock_Config_HSI(uint8_t clock_freq);
+
+
+UART_HandleTypeDef huart2;
+
+int main(void) {
+
+	char msg[100];
+
+	HAL_Init();
+	SystemClock_Config_HSI(SYS_CLOCK_FREQ_120MHZ);
+
+	UART2_Init();
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "SYSCLK : %ldHz\r\n", HAL_RCC_GetSysClockFreq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "HCLK : %ldHz\r\n", HAL_RCC_GetHCLKFreq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "PCLK1 : %ldHz\r\n", HAL_RCC_GetPCLK1Freq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	memset(msg, 0, sizeof(msg));
+	sprintf(msg, "PCLK2 : %ldHz\r\n", HAL_RCC_GetPCLK2Freq());
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSI(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+
+	//Refer to reference manual (HCLK Wait States Latency)
+	uint32_t FLatency = 0;
+
+	//HSI is not a great choice for deriving the PLL clock, because of stability issues due to the accuracy varying with temperature change.
+	//Using HSI to derive PLL in this example:
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSI; //already set to HSI by default
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.HSICalibrationValue = 16;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSI; //HSI = 16MHz
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			FLatency = FLASH_ACR_LATENCY_1WS;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			FLatency = FLASH_ACR_LATENCY_2WS;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			FLatency = FLASH_ACR_LATENCY_3WS;
+			break;
+		}
+		default:
+			break;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, FLatency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Systick config
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+	printf("error");
+	while(1);
+}
+
+*********************************************************************************************************
+											RTC_AlarmA
+*********************************************************************************************************
+#include "main.h"
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void RTC_Init(void);
+void RTC_CalendarConfig(void);
+void RTC_AlarmConfig(void);
+char* getAMPM(uint8_t number);
+char* getDayOfWeek(uint8_t number);
+
+UART_HandleTypeDef huart2;
+RTC_HandleTypeDef hrtc;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+	RTC_Init();
+	printmsg("RTC Alarm Test\r\n");
+
+	while(1)
+	{}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5 | GPIO_PIN_8;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void RTC_Init(void) {
+
+	hrtc.Instance = RTC;
+	hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+	hrtc.Init.AsynchPrediv = 0x7F; 	//127   (+1 = 128 because division of 1+prescaler)
+	hrtc.Init.SynchPrediv = 0xFF; 	//255   (+1 = 256 because division of 1+prescaler)
+	hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+	hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_LOW; //doesn't matter if output disabled
+	hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;   //doesn't matter if output disabled
+
+	if(HAL_RTC_Init(&hrtc) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_CalendarConfig(void) {
+
+	RTC_TimeTypeDef RTC_TimeInit;
+	RTC_DateTypeDef RTC_DateInit;
+
+	// Configuring the Calendar for Time: 12:45:00 (24h) Date: 12 June 2018 Tuesday
+	// (Sending binary values which will get converted to BCD)
+	RTC_TimeInit.Hours = 12;
+	RTC_TimeInit.Minutes = 45;
+	RTC_TimeInit.Seconds = 00;
+	//RTC_TimeInit.TimeFormat = RTC_HOURFORMAT12_PM;
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+
+	RTC_DateInit.Date = 12;
+	RTC_DateInit.Month = RTC_MONTH_JUNE;
+	RTC_DateInit.Year = 18;  //2000 + year (18) = 2018
+	RTC_DateInit.WeekDay = RTC_WEEKDAY_TUESDAY;
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+char* getAMPM(uint8_t number) {
+
+	char *AMPM[] = { "AM", "PM", "ER"};
+
+	if(number == RTC_HOURFORMAT12_AM)
+		//AM
+		return AMPM[0];
+	else if(number == RTC_HOURFORMAT12_PM)
+		//PM
+		return AMPM[1];
+	else
+		//Error
+		return AMPM[2];
+}
+
+char* getDayOfWeek(uint8_t number) {
+
+	char *weekday[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+	return weekday[number-1];
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	//print RTC time and date details
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+
+	RTC_CalendarConfig();
+
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	printmsg("Current Time is: %02d:%02d:%02d%s\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds, getAMPM(RTC_TimeRead.TimeFormat));
+	printmsg("Current Date is: <%s> %02d-%2d-%2d\r\n", getDayOfWeek(RTC_DateRead.WeekDay), RTC_DateRead.Month, RTC_DateRead.Date, RTC_DateRead.Year);
+
+	RTC_AlarmConfig();
+}
+
+void RTC_AlarmConfig(void) {
+
+	RTC_AlarmTypeDef AlarmA_Set;
+	memset(&AlarmA_Set, 0, sizeof(AlarmA_Set));
+
+	HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+
+	//xx:45:09
+	AlarmA_Set.Alarm = RTC_ALARM_A;
+	AlarmA_Set.AlarmTime.Minutes = 45;
+	AlarmA_Set.AlarmTime.Seconds = 9;
+	//Masking out the "don't-care" fields
+	AlarmA_Set.AlarmMask = RTC_ALARMMASK_HOURS | RTC_ALARMMASK_DATEWEEKDAY;
+	AlarmA_Set.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_NONE;
+	if(HAL_RTC_SetAlarm_IT(&hrtc, &AlarmA_Set, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+	printmsg("Alarm Set Successful\r\n");
+}
+
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc) {
+
+	RTC_TimeTypeDef RTC_TimeRead;
+
+	printmsg("Alarm Triggered\r\n");
+
+	HAL_RTC_GetTime(hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	printmsg("Current Time is : %02d:%02d:%02d\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds);
+
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_5,GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_8,GPIO_PIN_SET);
+	HAL_Delay(2000); //ok to use in this example. delay is derived from systick interrupt which has highest priority, so it will preempt this ISR
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_5,GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_8,GPIO_PIN_RESET);
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										RTC_AlarmA_12h
+*********************************************************************************************************
+#include "main.h"
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void RTC_Init(void);
+void RTC_CalendarConfig(void);
+void RTC_AlarmConfig(void);
+char* getAMPM(uint8_t number);
+char* getDayOfWeek(uint8_t number);
+
+UART_HandleTypeDef huart2;
+RTC_HandleTypeDef hrtc;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+	RTC_Init();
+	printmsg("RTC Alarm Test\r\n");
+
+	while(1)
+	{}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5 | GPIO_PIN_8;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void RTC_Init(void) {
+
+	hrtc.Instance = RTC;
+	hrtc.Init.HourFormat = RTC_HOURFORMAT_12;
+	hrtc.Init.AsynchPrediv = 0x7F; 	//127   (+1 = 128 because division of 1+prescaler)
+	hrtc.Init.SynchPrediv = 0xFF; 	//255   (+1 = 256 because division of 1+prescaler)
+	hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+	hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_LOW; //doesn't matter if output disabled
+	hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;   //doesn't matter if output disabled
+
+	if(HAL_RTC_Init(&hrtc) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_CalendarConfig(void) {
+
+	RTC_TimeTypeDef RTC_TimeInit;
+	RTC_DateTypeDef RTC_DateInit;
+
+	// Configuring the Calendar for Time: 7:59:59 PM  Date: 30 January 2022 Sunday
+	// (Sending binary values which will get converted to BCD)
+	RTC_TimeInit.Hours = 7;
+	RTC_TimeInit.Minutes = 59;
+	RTC_TimeInit.Seconds = 59;
+	RTC_TimeInit.TimeFormat = RTC_HOURFORMAT12_PM;
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+
+	RTC_DateInit.Date = 30;
+	RTC_DateInit.Month = RTC_MONTH_JANUARY;
+	RTC_DateInit.Year = 22;  //2000 + year (22) = 2022
+	RTC_DateInit.WeekDay = RTC_WEEKDAY_SUNDAY;
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+char* getAMPM(uint8_t number) {
+
+	char *AMPM[] = { "AM", "PM", "ER"};
+
+	if(number == RTC_HOURFORMAT12_AM)
+		//AM
+		return AMPM[0];
+	else if(number == RTC_HOURFORMAT12_PM)
+		//PM
+		return AMPM[1];
+	else
+		//Error
+		return AMPM[2];
+}
+
+char* getDayOfWeek(uint8_t number) {
+
+	char *weekday[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+	return weekday[number-1];
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	//print RTC time and date details
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+
+	RTC_CalendarConfig();
+
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	printmsg("Current Time is: %02d:%02d:%02d%s\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds, getAMPM(RTC_TimeRead.TimeFormat));
+	printmsg("Current Date is: <%s> %02d-%2d-%2d\r\n", getDayOfWeek(RTC_DateRead.WeekDay), RTC_DateRead.Month, RTC_DateRead.Date, RTC_DateRead.Year);
+
+	RTC_AlarmConfig();
+}
+
+void RTC_AlarmConfig(void) {
+
+	RTC_AlarmTypeDef AlarmA_Set;
+	memset(&AlarmA_Set, 0, sizeof(AlarmA_Set));
+
+	HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+
+	//8:00:00 AM Every Sunday
+	AlarmA_Set.Alarm = RTC_ALARM_A;
+	AlarmA_Set.AlarmTime.Hours = 8;
+	AlarmA_Set.AlarmTime.Minutes = 00;
+	AlarmA_Set.AlarmTime.Seconds = 00;
+	AlarmA_Set.AlarmTime.TimeFormat = RTC_HOURFORMAT12_AM;
+	AlarmA_Set.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_WEEKDAY;
+	AlarmA_Set.AlarmDateWeekDay = RTC_WEEKDAY_SUNDAY;
+
+	//Masking out the "don't-care" fields
+	AlarmA_Set.AlarmMask = RTC_ALARMMASK_NONE;
+	AlarmA_Set.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_NONE;
+	if(HAL_RTC_SetAlarm_IT(&hrtc, &AlarmA_Set, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+	printmsg("Alarm Set Successful\r\n");
+}
+
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc) {
+
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+
+	printmsg("Alarm Triggered\r\n");
+
+	HAL_RTC_GetTime(hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+	printmsg("Current Time is: %02d:%02d:%02d%s\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds, getAMPM(RTC_TimeRead.TimeFormat));
+	printmsg("Current Date is: <%s> %02d-%2d-%2d\r\n", getDayOfWeek(RTC_DateRead.WeekDay), RTC_DateRead.Month, RTC_DateRead.Date, RTC_DateRead.Year);
+
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_5,GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_8,GPIO_PIN_SET);
+	HAL_Delay(2000); //ok to use in this example. delay is derived from systick interrupt which has highest priority, so it will preempt this ISR
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_5,GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA,GPIO_PIN_8,GPIO_PIN_RESET);
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+									RTC_AlarmA_Standby_Wkup
+*********************************************************************************************************
+#include "main.h"
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void RTC_Init(void);
+void RTC_CalendarConfig(void);
+void RTC_AlarmConfig(void);
+char* getAMPM(uint8_t number);
+char* getDayOfWeek(uint8_t number);
+
+UART_HandleTypeDef huart2;
+RTC_HandleTypeDef hrtc;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	RTC_TimeTypeDef  RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+	RTC_Init();
+
+	__HAL_RCC_PWR_CLK_ENABLE();
+
+	if(__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != RESET) {
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+		__HAL_RTC_ALARM_CLEAR_FLAG(&hrtc, RTC_FLAG_ALRAF);
+
+		printmsg("Woke up from standby mode\r\n");
+
+		HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+		HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+		printmsg("Current Time is: %02d:%02d:%02d%s\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds, getAMPM(RTC_TimeRead.TimeFormat));
+		printmsg("Current Date is: <%s> %02d-%2d-%2d\r\n", getDayOfWeek(RTC_DateRead.WeekDay), RTC_DateRead.Month, RTC_DateRead.Date, RTC_DateRead.Year);
+
+		HAL_GPIO_WritePin(GPIOA,GPIO_PIN_5,GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOA,GPIO_PIN_8,GPIO_PIN_SET);
+		HAL_Delay(2000);
+		HAL_GPIO_WritePin(GPIOA,GPIO_PIN_5,GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOA,GPIO_PIN_8,GPIO_PIN_RESET);
+
+	}
+	printmsg("RTC Alarm Test\r\n");
+
+	while(1)
+	{}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5 | GPIO_PIN_8;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void RTC_Init(void) {
+
+	hrtc.Instance = RTC;
+	hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+	hrtc.Init.AsynchPrediv = 0x7F; 	//127   (+1 = 128 because division of 1+prescaler)
+	hrtc.Init.SynchPrediv = 0xFF; 	//255   (+1 = 256 because division of 1+prescaler)
+	hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+	hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_LOW; //doesn't matter if output disabled
+	hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;   //doesn't matter if output disabled
+
+	if(HAL_RTC_Init(&hrtc) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_CalendarConfig(void) {
+
+	RTC_TimeTypeDef RTC_TimeInit;
+	RTC_DateTypeDef RTC_DateInit;
+
+	// Configuring the Calendar for Time: 23:15:15 (24h)  Date: 29 January 2022 Saturday
+	// (Sending binary values which will get converted to BCD)
+	RTC_TimeInit.Hours = 23;
+	RTC_TimeInit.Minutes = 15;
+	RTC_TimeInit.Seconds = 15;
+	//RTC_TimeInit.TimeFormat = RTC_HOURFORMAT12_PM;
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+
+	RTC_DateInit.Date = 29;
+	RTC_DateInit.Month = RTC_MONTH_JANUARY;
+	RTC_DateInit.Year = 22;  //2000 + year (22) = 2022
+	RTC_DateInit.WeekDay = RTC_WEEKDAY_SATURDAY;
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+char* getAMPM(uint8_t number) {
+
+	char *AMPM[] = { "AM", "PM", "ER"};
+
+	if(number == RTC_HOURFORMAT12_AM)
+		//AM
+		return AMPM[0];
+	else if(number == RTC_HOURFORMAT12_PM)
+		//PM
+		return AMPM[1];
+	else
+		//Error
+		return AMPM[2];
+}
+
+char* getDayOfWeek(uint8_t number) {
+
+	char *weekday[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+	return weekday[number-1];
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	//print RTC time and date details
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+
+	RTC_CalendarConfig();
+
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	printmsg("Current Time is: %02d:%02d:%02d%s\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds, getAMPM(RTC_TimeRead.TimeFormat));
+	printmsg("Current Date is: <%s> %02d-%2d-%2d\r\n", getDayOfWeek(RTC_DateRead.WeekDay), RTC_DateRead.Month, RTC_DateRead.Date, RTC_DateRead.Year);
+
+	//Make sure that WUF and RTC Alarm A flags are cleared
+	__HAL_RTC_ALARM_CLEAR_FLAG(&hrtc, RTC_FLAG_ALRAF);
+	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+
+	RTC_AlarmConfig();
+
+	printmsg("Went to STANDBY mode\r\n");
+	HAL_PWR_EnterSTANDBYMode();
+}
+
+void RTC_AlarmConfig(void) {
+
+	RTC_AlarmTypeDef AlarmA_Set;
+	memset(&AlarmA_Set, 0, sizeof(AlarmA_Set));
+
+	HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+
+	//8:00:00 AM
+	AlarmA_Set.Alarm = RTC_ALARM_A;
+	AlarmA_Set.AlarmTime.Hours = 23;
+	AlarmA_Set.AlarmTime.Minutes = 15;
+	AlarmA_Set.AlarmTime.Seconds = 30;
+
+	//Masking out the "don't-care" fields
+	AlarmA_Set.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY;
+	AlarmA_Set.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_NONE;
+
+	if(HAL_RTC_SetAlarm_IT(&hrtc, &AlarmA_Set, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+	printmsg("Alarm Set Successful\r\n");
+}
+
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc) {
+
+	printmsg("Alarm Triggered\r\n");
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										RTC_Date_Time
+*********************************************************************************************************
+#include "main.h"
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void RTC_Init(void);
+void RTC_CalendarConfig(void);
+char* getAMPM(uint8_t number);
+char* getDayOfWeek(uint8_t number);
+
+UART_HandleTypeDef huart2;
+RTC_HandleTypeDef hrtc;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+
+	printmsg("This is the RTC Calendar Test program\r\n");
+	RTC_Init();
+
+	if(__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != RESET)
+	{
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+		__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+		printmsg("Woke up from STANDBY\r\n");
+		HAL_GPIO_EXTI_Callback(0);
+	}
+
+	//RTC_CalendarConfig();
+
+	//Enable the wakeup pin 1 in pwr_csr register (PA0)
+	HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);
+
+	//In Standby Mode, the RTC will not be affected!
+	printmsg("Went to STANDBY mode\r\n");
+	HAL_PWR_EnterSTANDBYMode();
+
+	while(1)
+	{}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void RTC_Init(void) {
+
+	hrtc.Instance = RTC;
+	hrtc.Init.HourFormat = RTC_HOURFORMAT_12;
+	hrtc.Init.AsynchPrediv = 0x7F; 	//127   (+1 = 128 because division of 1+prescaler)
+	hrtc.Init.SynchPrediv = 0xFF; 	//255   (+1 = 256 because division of 1+prescaler)
+	hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+	hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_LOW; //doesn't matter if output disabled
+	hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;   //doesn't matter if output disabled
+
+	if(HAL_RTC_Init(&hrtc) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_CalendarConfig(void) {
+
+	RTC_TimeTypeDef RTC_TimeInit;
+	RTC_DateTypeDef RTC_DateInit;
+
+	// Configuring the Calendar for Time: 12:11:10 PM Date: 12 June 2018 Tuesday
+	// (Sending binary values which will get converted to BCD)
+	RTC_TimeInit.Hours = 12;
+	RTC_TimeInit.Minutes = 11;
+	RTC_TimeInit.Seconds = 10;
+	RTC_TimeInit.TimeFormat = RTC_HOURFORMAT12_PM;
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+
+	RTC_DateInit.Date = 12;
+	RTC_DateInit.Month = RTC_MONTH_JUNE;
+	RTC_DateInit.Year = 18;  //2000 + year (18) = 2018
+	RTC_DateInit.WeekDay = RTC_WEEKDAY_TUESDAY;
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+char* getAMPM(uint8_t number) {
+
+	char *AMPM[] = { "AM", "PM", "ER"};
+
+	if(number == RTC_HOURFORMAT12_AM)
+		//AM
+		return AMPM[0];
+	else if(number == RTC_HOURFORMAT12_PM)
+		//PM
+		return AMPM[1];
+	else
+		//Error
+		return AMPM[2];
+}
+
+char* getDayOfWeek(uint8_t number) {
+
+	char *weekday[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+	return weekday[number-1];
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	//print RTC time and date details
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	printmsg("Current Time is: %02d:%02d:%02d%s\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds, getAMPM(RTC_TimeRead.TimeFormat));
+	printmsg("Current Date is: <%s> %02d-%2d-%2d\r\n", getDayOfWeek(RTC_DateRead.WeekDay), RTC_DateRead.Month, RTC_DateRead.Date, RTC_DateRead.Year);
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+
+*********************************************************************************************************
+										RTC_Demo_App
+*********************************************************************************************************
+#include "main.h"
+#include <math.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM6_Init(void);
+void RTC_Init(void);
+void RTC_CalendarConfig(void);
+
+char* getAMPM(uint8_t number);
+char* getDayOfWeek(uint8_t number);
+
+uint8_t PrintUserMenu(void);
+uint8_t is_valid_time_set(void);
+uint8_t CalendarDemo(uint8_t arg);
+uint8_t AlarmDemo(uint8_t arg);
+uint8_t LowPowerDemo(uint8_t arg);
+uint8_t TimeStampDemo(uint8_t arg);
+uint8_t CalendarDemoPrintMenu(void);
+uint8_t LowPowerDemoPrintMenu(void);
+uint8_t AlarmDemoPrint(void);
+uint16_t getYear(uint8_t *year);
+void RTC_configureUserGivenTime(uint8_t seconds, uint8_t minutes, uint8_t hour, uint8_t AMPM, uint8_t format);
+void RTC_configureUserGivenDate(uint16_t year, uint8_t month, uint8_t date);
+void RTC_DisplayCurrentTime(void);
+void RTC_DisplayCurrentDate(void);
+
+uint8_t user_input[30];
+uint8_t user_data = '\0';
+UART_HandleTypeDef huart2;
+TIM_HandleTypeDef htim6;
+RTC_HandleTypeDef hrtc;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_84MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+	RTC_Init();
+	TIM6_Init();
+
+	RTC_CalendarConfig();
+
+	while(!PrintUserMenu())
+	{}
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM6_Init(void) {
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 4999;
+	htim6.Init.Period = 10000-1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_Init(void) {
+
+	hrtc.Instance = RTC;
+	hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+	hrtc.Init.AsynchPrediv = RTC_ASYNC_PREDIV; 	//127   (+1 = 128 because division of 1+prescaler)
+	hrtc.Init.SynchPrediv = RTC_SYNC_PREDIV; 	//255   (+1 = 256 because division of 1+prescaler)
+	hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+	hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH; //doesn't matter if output disabled
+	hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;   //doesn't matter if output disabled
+	__HAL_RTC_RESET_HANDLE_STATE(&hrtc);
+	if(HAL_RTC_Init(&hrtc) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_CalendarConfig(void) {
+
+	RTC_TimeTypeDef RTC_TimeInit;
+	RTC_DateTypeDef RTC_DateInit;
+
+	// Configuring the Calendar for Time: 3:30:15 PM  Date: 31 January 2022 Monday
+	// (Sending binary values which will get converted to BCD)
+	RTC_TimeInit.Hours = 3;
+	RTC_TimeInit.Minutes = 30;
+	RTC_TimeInit.Seconds = 15;
+	RTC_TimeInit.TimeFormat = RTC_HOURFORMAT12_PM;
+	RTC_TimeInit.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+	RTC_TimeInit.StoreOperation = RTC_STOREOPERATION_RESET;
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+
+	RTC_DateInit.Date = 31;
+	RTC_DateInit.Month = RTC_MONTH_JANUARY;
+	RTC_DateInit.Year = 22;  //2000 + year (22) = 2022
+	RTC_DateInit.WeekDay = RTC_WEEKDAY_MONDAY;
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+char* getAMPM(uint8_t number) {
+
+	char *AMPM[] = { "AM", "PM", "ER"};
+
+	if(number == RTC_HOURFORMAT12_AM)
+		//AM
+		return AMPM[0];
+	else if(number == RTC_HOURFORMAT12_PM)
+		//PM
+		return AMPM[1];
+	else
+		//Error
+		return AMPM[2];
+}
+
+char* getDayOfWeek(uint8_t number) {
+
+	char *weekday[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+	return weekday[number-1];
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	char showtime[50];
+
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+	memset(&RTC_TimeRead, 0, sizeof(RTC_TimeRead));
+	memset(&RTC_DateRead, 0, sizeof(RTC_DateRead));
+
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	sprintf((char*)showtime, "%02d:%02d:%02d  ", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds);
+	HAL_UART_Transmit(&huart2, (uint8_t*)showtime, strlen(showtime), HAL_MAX_DELAY);
+
+	memset(showtime,0,sizeof(showtime));
+
+	sprintf((char*)showtime, "%02d-%2d-%2d\r\n", RTC_DateRead.Month, RTC_DateRead.Date, 2000 + RTC_DateRead.Year);
+	HAL_UART_Transmit(&huart2, (uint8_t*)showtime, strlen(showtime), HAL_MAX_DELAY);
+}
+
+uint8_t PrintUserMenu(void) {
+
+	uint32_t count = 0;
+	uint8_t arg, ret;
+
+	printmsg("** RTC Demo App **/r/n");
+	printmsg("Calendar Demo       --> 1/r/n");
+	printmsg("Alarm Demo          --> 2/r/n");
+	printmsg("TimeStamp Demo      --> 3/r/n");
+	printmsg("Low-Power Mode Demo --> 4/r/n");
+	printmsg("Exit App            --> 0/r/n");
+	printmsg("Enter your option here: ");
+
+	while(user_data != '\r') {
+		HAL_UART_Receive(&huart2, (uint8_t*)&user_data, 1, HAL_MAX_DELAY);
+		user_input[count] = user_data;
+		count++;
+	}
+	printmsg("\r\n received inputs %d %d \r\n", user_input[0], user_input[1]);
+
+
+	switch(user_input[0]) {
+	case '1':
+		arg = CalendarDemoPrintMenu();
+		ret = CalendarDemo(arg);
+		while(ret) {
+			arg = CalendarDemoPrintMenu();
+			ret = CalendarDemo(arg);
+		}
+		break;
+
+	case '2':
+		arg = AlarmDemoPrint();
+		ret = AlarmDemo(arg);
+		while(ret) {
+			ret = AlarmDemo(arg);
+		}
+		break;
+	case '3':
+		printmsg("Timestamp Demo\r\n");
+		if(is_valid_time_set()) {
+			printmsg("Press the user button to know the current timestamp\r\n");
+			TimeStampDemo(0);
+		} else {
+			printmsg("Valid time is not yet set. First set the time and then try this demo\r\n");
+		}
+		break;
+	case '4':
+		arg = LowPowerDemoPrintMenu();
+		ret = LowPowerDemo(arg);
+		while(ret) {
+			ret = LowPowerDemo(arg);
+		}
+		break;
+	case '0':
+		printmsg("Exiting application..\r\n");
+		return 1;
+		break;
+	default:
+		printmsg("\r\nInvalid option..\r\n");
+	}
+	return 0;
+}
+
+uint8_t is_valid_time_set(void) {
+
+	//TODO
+	return 1;
+}
+
+uint8_t CalendarDemo(uint8_t arg) {
+
+	uint8_t time_format, seconds, minutes, hours, date, month, ampm;
+	uint8_t user_input[6];
+	uint32_t count = 0;
+
+	switch(arg) {
+	case '1':
+		printmsg("Choose a time format:\r\n");
+		printmsg("24h --> 0\r\n");
+		printmsg("12h --> 1\r\n");
+		printmsg("Enter option here: ");
+
+		while(user_data != '\r') {
+			HAL_UART_Receive(&huart2, (uint8_t*)&user_data, 1, HAL_MAX_DELAY);
+			user_input[count] = user_data;
+			count++;
+		}
+		printmsg("\r\n received inputs %d %d \r\n", user_input[0], user_input[1]);
+		time_format = (user_input[0] - 48);
+
+		printmsg("Enter Hours (1-12) or (1-24) :");
+		while(user_data != '\r') {
+			HAL_UART_Receive(&huart2, (uint8_t*)&user_data, 1, HAL_MAX_DELAY);
+			user_input[count] = user_data;
+			count++;
+		}
+	    printmsg("\r\n received inputs %d %d \r", user_input[0], user_input[1]);
+	    hours = user_input[0];
+
+		printmsg("Enter minutes value here(0-59) :");
+		HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+		printmsg("\r\n received inputs %d %d \r", user_input[0], user_input[1]);
+		minutes = user_input[0];
+
+		printmsg("Enter seconds value here(0-59) :");
+		HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+		printmsg("\r\n received inputs %d %d \r", user_input[0], user_input[1]);
+		seconds = user_input[0];
+
+		printmsg("Is it AM(1) or PM(0)?:");
+		HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+		ampm = user_input[0];
+
+		RTC_Init();
+
+		RTC_configureUserGivenTime(seconds, minutes, hours, ampm, time_format);
+		printmsg("\r\nTime set Successful !\r\n");
+		RTC_DisplayCurrentTime();
+		break;
+
+	case '2':
+		printmsg("Enter Date(1-31) value here :");
+		HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+	    printmsg("\r\n received inputs %d %d \r\n", user_input[0], user_input[1]);
+	    date = user_input[0];
+
+		printmsg("Enter month value here(1-12) :");
+		HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+		printmsg("\r\n received inputs %d %d \r\n", user_input[0], user_input[1]);
+		month = user_input[0];
+
+		uint8_t year[5];
+		printmsg("Enter year value here :");
+		HAL_UART_Receive(&huart2, year, 5, HAL_MAX_DELAY);
+
+		uint16_t year_16t = getYear(year);
+		RTC_configureUserGivenDate(year_16t, month, date);
+
+		printmsg("Date is set!\r\n");
+		RTC_DisplayCurrentDate();
+		break;
+
+	case '3':
+		RTC_DisplayCurrentTime();
+		RTC_DisplayCurrentDate();
+		break;
+
+	case '0':
+		return 0;
+
+	default :
+		printmsg("\r\nInvalid option..\r\n");
+	}
+
+	return 1;
+}
+
+uint8_t AlarmDemo(uint8_t arg) {
+	//TODO
+	return 0;
+}
+uint8_t LowPowerDemo(uint8_t arg) {
+	//TODO
+	return 0;
+}
+
+uint8_t TimeStampDemo(uint8_t arg) {
+	//TODO
+	return 0;
+}
+
+uint8_t CalendarDemoPrintMenu(void) {
+
+	uint32_t count = 0;
+	uint8_t user_input[2];
+
+	printmsg("** Calendar Demo **\r\n");
+	printmsg("Set time                      --> 1\r\n");
+	printmsg("Set date                      --> 2\r\n");
+	printmsg("Display current time and date --> 3\r\n");
+	printmsg("Go back to main menu          --> 0\r\n");
+	printmsg("Enter option here :");
+
+	while(user_data != '\r') {
+		HAL_UART_Receive(&huart2, (uint8_t*)&user_data, 1, HAL_MAX_DELAY);
+		user_input[count] = user_data;
+		count++;
+	}
+
+	printmsg("\r\n received inputs %d %d \r\n", user_input[0], user_input[1]);
+
+	return user_input[0];
+}
+
+uint8_t LowPowerDemoPrintMenu(void) {
+
+	uint8_t user_input[2];
+
+	printmsg("** Low Power Demo **\r\n");
+	printmsg("STOP mode demo + RTC alarm\r\n");
+	printmsg("STANDBY mode demo + RTC wakeup timer\r\n");
+	printmsg("Enter option here :");
+
+	HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+	printmsg("\r\n received inputs %d %d \r", user_input[0], user_input[1]);
+
+	return user_input[0];
+}
+
+uint8_t AlarmDemoPrint(void) {
+
+	uint8_t user_input[2];
+
+	printmsg("** Alarm Demo **\r\n");
+	printmsg("Display already set alarm\r\n");
+	printmsg("Delete an alarm\r\n");
+	printmsg("Set new Alarm\r\n");
+	printmsg("Enter option here :");
+
+	HAL_UART_Receive(&huart2, user_input, 2, HAL_MAX_DELAY);
+	printmsg("\r\n received inputs %d %d \r", user_input[0], user_input[1]);
+
+	return user_input[0];
+}
+
+void RTC_configureUserGivenTime(uint8_t seconds, uint8_t minutes, uint8_t hour, uint8_t AMPM, uint8_t format) {
+
+	RTC_TimeTypeDef RTC_TimeRead;
+
+	/* Set Time: */
+	RTC_TimeRead.Hours = hour;
+	RTC_TimeRead.Minutes = minutes;
+	RTC_TimeRead.Seconds = seconds;
+	if(format) {
+		if(AMPM) {
+		  RTC_TimeRead.TimeFormat = RTC_HOURFORMAT12_AM;
+		} else {
+		  RTC_TimeRead.TimeFormat = RTC_HOURFORMAT12_PM;
+		}
+	}
+	RTC_TimeRead.DayLightSaving = RTC_DAYLIGHTSAVING_NONE ;
+	RTC_TimeRead.StoreOperation = RTC_STOREOPERATION_RESET;
+
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BCD) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_configureUserGivenDate(uint16_t year, uint8_t month, uint8_t date) {
+
+	RTC_DateTypeDef RTC_DateRead;
+	year = year % 100;
+
+	/* Set Date: */
+	RTC_DateRead.Year = year;
+	RTC_DateRead.Month = month;
+	RTC_DateRead.Date = date;
+	//RTC_DateRead.WeekDay = RTC_WEEKDAY_THURSDAY;
+
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BCD) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_DisplayCurrentTime(void) {
+
+	char showtime[50];
+	RTC_TimeTypeDef RTC_TimeRead;
+	memset(&RTC_TimeRead, 0, sizeof(RTC_TimeRead));
+
+	/* Get the RTC current Time */
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+
+	/* Display time Format : hh:mm:ss */
+	sprintf((char*)showtime, "Current Time is : %02d:%02d:%02d\r\n", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds);
+	HAL_UART_Transmit(&huart2, (uint8_t*)showtime, strlen(showtime), HAL_MAX_DELAY);
+}
+
+void RTC_DisplayCurrentDate(void) {
+
+	char showtime[50];
+	RTC_DateTypeDef RTC_DateRead;
+	memset(&RTC_DateRead, 0, sizeof(RTC_DateRead));
+
+	/* Get the RTC current Date */
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	memset(showtime, 0, sizeof(showtime));
+	sprintf((char*)showtime, "Current Date is : %02d-%2d-%2d\r\n", RTC_DateRead.Month, RTC_DateRead.Date, 2000 + RTC_DateRead.Year);
+
+	HAL_UART_Transmit(&huart2, (uint8_t*)showtime, strlen(showtime), HAL_MAX_DELAY);
+}
+
+uint16_t getYear(uint8_t *year) {
+
+	uint8_t value = 0;
+	uint16_t sum = 0;
+
+	for(uint32_t i = 0; i < 4 ; i++) {
+	   value = (year[i] - 48);
+	   if((value >= 0) && (value <= 9)) {
+		   pow(10,i);
+		   sum  = (sum + (value * (1000 / (pow(10,i)))));
+	   } else {
+		   return 0;
+	   }
+	}
+
+	return sum;
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										RTC_Print_TimeInfo
+*********************************************************************************************************
+#include "main.h"
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM6_Init(void);
+void RTC_Init(void);
+void RTC_CalendarConfig(void);
+void RTC_AlarmConfig(void);
+char* getAMPM(uint8_t number);
+char* getDayOfWeek(uint8_t number);
+
+UART_HandleTypeDef huart2;
+TIM_HandleTypeDef htim6;
+RTC_HandleTypeDef hrtc;
+
+void printmsg(char *format, ...) {
+
+	char str[80];
+
+	/* Extract the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format, args);
+	HAL_UART_Transmit(&huart2, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	va_end(args);
+}
+
+int main(void) {
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_84MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+	RTC_Init();
+
+	RTC_CalendarConfig();
+
+	while(1)
+	{}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING;
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM6_Init(void) {
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 4999;
+	htim6.Init.Period = 10000-1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_Init(void) {
+
+	hrtc.Instance = RTC;
+	hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+	hrtc.Init.AsynchPrediv = RTC_ASYNC_PREDIV; 	//127   (+1 = 128 because division of 1+prescaler)
+	hrtc.Init.SynchPrediv = RTC_SYNC_PREDIV; 	//255   (+1 = 256 because division of 1+prescaler)
+	hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+	hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH; //doesn't matter if output disabled
+	hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;   //doesn't matter if output disabled
+	__HAL_RTC_RESET_HANDLE_STATE(&hrtc);
+	if(HAL_RTC_Init(&hrtc) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void RTC_CalendarConfig(void) {
+
+	RTC_TimeTypeDef RTC_TimeInit;
+	RTC_DateTypeDef RTC_DateInit;
+
+	// Configuring the Calendar for Time: 3:30:15 PM  Date: 31 January 2022 Monday
+	// (Sending binary values which will get converted to BCD)
+	RTC_TimeInit.Hours = 3;
+	RTC_TimeInit.Minutes = 30;
+	RTC_TimeInit.Seconds = 15;
+	RTC_TimeInit.TimeFormat = RTC_HOURFORMAT12_PM;
+	RTC_TimeInit.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+	RTC_TimeInit.StoreOperation = RTC_STOREOPERATION_RESET;
+	if(HAL_RTC_SetTime(&hrtc, &RTC_TimeInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+
+	RTC_DateInit.Date = 31;
+	RTC_DateInit.Month = RTC_MONTH_JANUARY;
+	RTC_DateInit.Year = 22;  //2000 + year (22) = 2022
+	RTC_DateInit.WeekDay = RTC_WEEKDAY_MONDAY;
+	if(HAL_RTC_SetDate(&hrtc, &RTC_DateInit, RTC_FORMAT_BIN) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+char* getAMPM(uint8_t number) {
+
+	char *AMPM[] = { "AM", "PM", "ER"};
+
+	if(number == RTC_HOURFORMAT12_AM)
+		//AM
+		return AMPM[0];
+	else if(number == RTC_HOURFORMAT12_PM)
+		//PM
+		return AMPM[1];
+	else
+		//Error
+		return AMPM[2];
+}
+
+char* getDayOfWeek(uint8_t number) {
+
+	char *weekday[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+	return weekday[number-1];
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	char showtime[50];
+
+	RTC_TimeTypeDef RTC_TimeRead;
+	RTC_DateTypeDef RTC_DateRead;
+	memset(&RTC_TimeRead, 0, sizeof(RTC_TimeRead));
+	memset(&RTC_DateRead, 0, sizeof(RTC_DateRead));
+
+	HAL_RTC_GetTime(&hrtc, &RTC_TimeRead, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &RTC_DateRead, RTC_FORMAT_BIN);
+
+	sprintf((char*)showtime, "%02d:%02d:%02d  ", RTC_TimeRead.Hours, RTC_TimeRead.Minutes, RTC_TimeRead.Seconds);
+	HAL_UART_Transmit(&huart2, (uint8_t*)showtime, strlen(showtime), HAL_MAX_DELAY);
+
+	memset(showtime,0,sizeof(showtime));
+
+	sprintf((char*)showtime, "%02d-%2d-%2d\r\n", RTC_DateRead.Month, RTC_DateRead.Date, 2000 + RTC_DateRead.Year);
+	HAL_UART_Transmit(&huart2, (uint8_t*)showtime, strlen(showtime), HAL_MAX_DELAY);
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										Sleep-On-Exit_1
+*********************************************************************************************************
+//////////////////////// data.c //////////////////////// 
+char some_data[] = "Testing of the SLEEPONEXIT feature\r\n";
+
+//////////////////////// main.c //////////////////////// 
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM6_Init(void);
+void GPIO_AnalogConfig(void);
+void Error_handler(void);
+
+TIM_HandleTypeDef htim6;
+UART_HandleTypeDef huart2;
+
+extern uint8_t some_data[];
+
+int main(void) {
+
+	HAL_Init();
+
+	//SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	//HAL_SuspendTick();
+	UART2_Init();
+	TIM6_Init();
+
+	GPIO_AnalogConfig();
+
+	//SCB->SCR |= ( 1 << 1);
+	HAL_PWR_EnableSleepOnExit();
+
+	/* Clear Status register of TIM6 to avoid any invalid interrupts */
+	TIM6->SR = 0;
+
+	HAL_TIM_Base_Start_IT(&htim6);
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_AnalogConfig(void) {
+
+	GPIO_InitTypeDef GpioA;
+
+	uint32_t gpio_pins = 	GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | \
+							GPIO_PIN_5| GPIO_PIN_6 | GPIO_PIN_7  | \
+							GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | \
+							GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_13 | \
+							GPIO_PIN_14 | GPIO_PIN_15;
+
+
+	GpioA.Pin = gpio_pins;
+	GpioA.Mode = GPIO_MODE_ANALOG;
+	HAL_GPIO_Init(GPIOA, &GpioA);
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+
+	ledgpio.Pin = GPIO_PIN_5 | GPIO_PIN_12;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 230400;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM6_Init(void) {
+
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 4999;
+	htim6.Init.Period = 100-1;
+
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK ) {
+		Error_handler();
+	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+	 if(HAL_UART_Transmit(&huart2, (uint8_t*)some_data, (uint16_t)strlen((char*)some_data), HAL_MAX_DELAY) != HAL_OK) {
+		 Error_handler();
+	 }
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+										timebase_100ms
+*********************************************************************************************************
+#include "main.h"
+
+void Error_handler(void);
+void GPIO_Init(void);
+void TIM6_Init(void);
+void SystemClock_Config(void);
+
+TIM_HandleTypeDef htim6;
+
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config();
+	GPIO_Init();
+	TIM6_Init();
+
+	//Start timer (polling mode instead of IT or DMA)
+	HAL_TIM_Base_Start(&htim6);
+
+	while(1) {
+		//Loop (poll) until the TIM6 update interrupt event flag (UIF) is set (TIM6_SR[0])
+		while(!(TIM6->SR & TIM_SR_UIF));
+
+		//The required time delay has elapsed (check on Logic analyzer)
+		//Blink LED on PA5 (user code)
+		TIM6->SR = 0; //UIF is changed by hardware, but then must be cleared by software
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	}
+
+	return 0;
+}
+
+void SystemClock_Config(void) {
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void TIM6_Init(void) {
+
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 24;
+	htim6.Init.Period = 64000 - 1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										timebase_100ms_IT
+*********************************************************************************************************
+#include "main.h"
+
+void Error_handler(void);
+void GPIO_Init(void);
+void TIM6_Init(void);
+void SystemClock_Config(void);
+
+TIM_HandleTypeDef htim6;
+
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config();
+	GPIO_Init();
+	TIM6_Init();
+
+	//Start timer (Interrupt mode - Non-Blocking)
+	HAL_TIM_Base_Start_IT(&htim6);
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config(void) {
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void TIM6_Init(void) {
+
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 24;
+	htim6.Init.Period = 64000 - 1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										timebase_10us_IT
+*********************************************************************************************************
+#include "main.h"
+
+void SystemClock_Config(uint8_t clock_freq);
+void GPIO_Init(void);
+void TIM6_Init(void);
+void Error_handler(void);
+
+TIM_HandleTypeDef htim6;
+
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	TIM6_Init();
+
+	//Start timer (Interrupt mode - Non-Blocking)
+	HAL_TIM_Base_Start_IT(&htim6);
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+
+	//HSI is not a great choice for deriving the PLL clock, because of stability issues due to the accuracy varying with temperature change.
+	//Using HSI to derive PLL
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSI; //already set to HSI by default
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.HSICalibrationValue = 16;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSI; //HSI = 16MHz
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, FLASH_LATENCY_2) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void TIM6_Init(void) {
+
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 9;
+	htim6.Init.Period = 50 - 1;
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+
+	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+											timer_IC_1
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config(uint8_t clock_freq);
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM6_Init(void);
+void TIM2_Init(void);
+void LSE_Config(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+TIM_HandleTypeDef htim6;
+TIM_HandleTypeDef htim2;
+
+uint32_t input_captures[2] = {0};
+uint8_t count = 1;
+volatile uint8_t is_capture_done = FALSE;
+
+int main(void) {
+
+	uint32_t capture_difference = 0;
+	double tim2_cnt_freq = 0;
+	double tim2_cnt_res = 0;
+	double user_signal_timeperiod = 0;
+	double user_signal_freq = 0;
+	char usr_msg[100];
+
+	HAL_Init();
+	//SystemClock_Config(SYS_CLOCK_FREQ_50MHZ);
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	UART2_Init();
+	TIM6_Init();
+	TIM2_Init();
+	LSE_Config();
+
+	HAL_TIM_Base_Start_IT(&htim6);
+	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
+
+	while(1) {
+		if(is_capture_done) {
+			if(input_captures[1] > input_captures[0]) {
+				capture_difference = (input_captures[1] - input_captures[0]);
+			} else {
+				capture_difference = ((0xFFFFFFFF - input_captures[0]) + input_captures[1]); //0xFFFFFFFF max value of ARR
+			}
+
+			tim2_cnt_freq = ((HAL_RCC_GetPCLK1Freq() * 2) / (htim2.Init.Prescaler + 1));
+			tim2_cnt_res = (1 / tim2_cnt_freq);
+			user_signal_timeperiod = (capture_difference * tim2_cnt_res);
+			user_signal_freq = (1 / user_signal_timeperiod);
+
+			sprintf(usr_msg, "Frequency of applied signal = %f\r\n", user_signal_freq);
+			HAL_UART_Transmit(&huart2, (uint8_t*)usr_msg, strlen(usr_msg), HAL_MAX_DELAY);
+
+			is_capture_done = FALSE;
+		}
+	}
+
+	return 0;
+}
+
+void SystemClock_Config(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+
+	//HSI is not a great choice for deriving the PLL clock, because of stability issues due to the accuracy varying with temperature change.
+	//Using HSI to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSI | RCC_OSCILLATORTYPE_LSE;
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.LSEState = RCC_LSE_ON;
+	osc_init.HSICalibrationValue = 16;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSI; //HSI = 16MHz
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, FLASH_LATENCY_2) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_LSE | RCC_OSCILLATORTYPE_HSI;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.LSEState = RCC_LSE_ON;
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM6_Init(void) {
+	htim6.Instance = TIM6;
+	htim6.Init.Prescaler = 9;
+	htim6.Init.Period = 50-1; //50kHz
+	if(HAL_TIM_Base_Init(&htim6) != HAL_OK)
+	{
+		Error_handler();
+	}
+}
+
+void TIM2_Init(void) {
+	TIM_IC_InitTypeDef tim2IC_Config;
+
+	htim2.Instance = TIM2;
+	htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim2.Init.Period = 0xFFFFFFFF; //32-bit timer (TIM2)
+	htim2.Init.Prescaler = 1;  		//SYSCLK = 50MHZ, so prescaler of 1 (divides by 2) makes the timer CNT_CLK 25MHz
+	if(HAL_TIM_IC_Init(&htim2) != HAL_OK) { //Initializes timer input capture time base
+		Error_handler();
+	}
+
+	tim2IC_Config.ICFilter = 0;
+	tim2IC_Config.ICPolarity = TIM_ICPOLARITY_RISING;
+	tim2IC_Config.ICPrescaler = TIM_ICPSC_DIV1;
+	tim2IC_Config.ICSelection = TIM_ICSELECTION_DIRECTTI;
+	if(HAL_TIM_IC_ConfigChannel(&htim2, &tim2IC_Config, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void LSE_Config(void) {
+
+	//Selects the Clock Source to output on MCO1 pin(PA8) or on MCO2 pin(PC9)
+	//No extra GPIO configuration needed to utilize PA8 here, as that is done by default within the HAL_RCC_MCOConfig()
+
+	//HAL_RCC_MCOConfig(RCC_MCO1, RCC_MCO1SOURCE_LSE, RCC_MCODIV_1);
+	HAL_RCC_MCOConfig(RCC_MCO1, RCC_MCO1SOURCE_HSI, RCC_MCODIV_4);
+}
+
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
+	//Save content to the Capture/Compare Register
+	if(!is_capture_done) {
+		if(count == 1) {
+			input_captures[0] = __HAL_TIM_GET_COMPARE(htim, TIM_CHANNEL_1);
+			count++;
+		}
+		else if(count == 2) {
+			input_captures[1] = __HAL_TIM_GET_COMPARE(htim, TIM_CHANNEL_1);
+			count = 1;
+			is_capture_done = TRUE;
+		}
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+											timer_OC_1
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM2_Init(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+TIM_HandleTypeDef htim2;
+
+uint32_t pulse1_value = 25000; 	//to produce 500Hz
+uint32_t pulse2_value = 12500;	//to produce 1kHz
+uint32_t pulse3_value = 6250;	//to produce 2kHz
+uint32_t pulse4_value = 3125;	//to produce 4kHz
+
+uint32_t ccr_content;
+
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	UART2_Init();
+	TIM2_Init();
+
+	if(HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+	if(HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_2) != HAL_OK) {
+		Error_handler();
+	}
+	if(HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_3) != HAL_OK) {
+		Error_handler();
+	}
+	if(HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_4) != HAL_OK) {
+		Error_handler();
+	}
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_LSE | RCC_OSCILLATORTYPE_HSI;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.LSEState = RCC_LSE_ON;
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM2_Init(void) {
+	TIM_OC_InitTypeDef tim2OC_init;
+
+	htim2.Instance = TIM2;
+	htim2.Init.Period = 0xFFFFFFFF; 		//32-bit timer (TIM2)
+	htim2.Init.Prescaler = 1;  				//SYSCLK = 50MHZ, so prescaler of 1 (divides by 2) makes the timer CNT_CLK 25MHz
+	if(HAL_TIM_OC_Init(&htim2) != HAL_OK) { //Initializes timer output compare time base
+		Error_handler();
+	}
+
+	//Channel 1 - 500Hz output
+	tim2OC_init.OCMode = TIM_OCMODE_TOGGLE;
+	tim2OC_init.OCPolarity = TIM_OCPOLARITY_HIGH; //CC1P bit field of TIM2_CCER register. signal path: oc1ref -> (here) mux selection -> OE Circuit -> OC1
+	tim2OC_init.Pulse = pulse1_value;
+	if(HAL_TIM_OC_ConfigChannel(&htim2, &tim2OC_init, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Channel 2 - 1kHz output
+	tim2OC_init.Pulse = pulse2_value;
+	if(HAL_TIM_OC_ConfigChannel(&htim2, &tim2OC_init, TIM_CHANNEL_2) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Channel 3 - 2kHz output
+	tim2OC_init.Pulse = pulse3_value;
+	if(HAL_TIM_OC_ConfigChannel(&htim2, &tim2OC_init, TIM_CHANNEL_3) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Channel 4 - 4kHz output
+	tim2OC_init.Pulse = pulse4_value;
+	if(HAL_TIM_OC_ConfigChannel(&htim2, &tim2OC_init, TIM_CHANNEL_4) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim) {
+	/* TIM2_CH1 toggling with f = 500Hz */
+	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
+		ccr_content = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
+		__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_1, ccr_content + pulse1_value);
+	}
+
+	/* TIM2_CH2 toggling with f = 1kHz */
+	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2) {
+		ccr_content = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
+		__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, ccr_content + pulse2_value);
+	}
+
+	/* TIM2_CH3 toggling with f = 2kHz */
+	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
+		ccr_content = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_3);
+		__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, ccr_content + pulse3_value);
+	}
+
+	/* TIM2_CH4 toggling with f = 4kHz */
+	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_4) {
+		ccr_content = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_4);
+		__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_4, ccr_content + pulse4_value);
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+*********************************************************************************************************
+										timer_OC_PWM_1
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM2_Init(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+TIM_HandleTypeDef htim2;
+
+int main(void) {
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	UART2_Init();
+	TIM2_Init();
+
+	//25% duty cycle
+	if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+	//45% duty cycle
+	if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2) != HAL_OK) {
+		Error_handler();
+	}
+	//75% duty cycle
+	if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3) != HAL_OK) {
+		Error_handler();
+	}
+	//90% duty cycle
+	if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4) != HAL_OK) {
+		Error_handler();
+	}
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_LSE | RCC_OSCILLATORTYPE_HSI;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.LSEState = RCC_LSE_ON;
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM2_Init(void) {
+	TIM_OC_InitTypeDef tim2PWM_Config;
+	memset(&tim2PWM_Config, 0, sizeof(tim2PWM_Config));
+
+	htim2.Instance = TIM2;
+	htim2.Init.Period = 10000-1; 				//32-bit timer (TIM2)
+	htim2.Init.Prescaler = 4999;  				//SYSCLK = 50MHZ, so prescaler of 4999 makes the timer CNT_CLK 10kHz
+	if(HAL_TIM_PWM_Init(&htim2) != HAL_OK) { 	//Initializes timer PWM time base with period 1 second.
+		Error_handler();
+	}
+
+	//Channel 1 - PWM 25% duty cycle
+	tim2PWM_Config.OCMode = TIM_OCMODE_PWM1;
+	tim2PWM_Config.OCPolarity = TIM_OCPOLARITY_HIGH; //CC1P bit field of TIM2_CCER register. signal path: oc1ref -> (here) mux selection -> OE Circuit -> OC1
+													 //polarity high -> ON (25%) then OFF (75%).   polarity low -> OFF (25%) then ON (75%)
+	tim2PWM_Config.Pulse = ((htim2.Init.Period * 25) / 100);
+	if(HAL_TIM_PWM_ConfigChannel(&htim2, &tim2PWM_Config, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Channel 2 - PWM 45% duty cycle
+	tim2PWM_Config.Pulse = ((htim2.Init.Period * 45) / 100);
+	if(HAL_TIM_PWM_ConfigChannel(&htim2, &tim2PWM_Config, TIM_CHANNEL_2) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Channel 3 - PWM 75% duty cycle
+	tim2PWM_Config.Pulse = ((htim2.Init.Period * 75) / 100);
+	if(HAL_TIM_PWM_ConfigChannel(&htim2, &tim2PWM_Config, TIM_CHANNEL_3) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Channel 4 - PWM 90% duty cycle
+	tim2PWM_Config.Pulse = ((htim2.Init.Period * 90) / 100);
+	if(HAL_TIM_PWM_ConfigChannel(&htim2, &tim2PWM_Config, TIM_CHANNEL_4) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										timer_PWM_LED
+*********************************************************************************************************
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void TIM2_Init(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+TIM_HandleTypeDef htim2;
+
+int main(void) {
+
+	uint16_t brightness = 0;
+
+	HAL_Init();
+	SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+	GPIO_Init();
+	UART2_Init();
+	TIM2_Init();
+
+	if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+
+	while(1) {
+		while(brightness < htim2.Init.Period) {
+			brightness+=10;
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, brightness);
+			HAL_Delay(1);
+		}
+
+		while(brightness > 0) {
+			brightness-=10;
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, brightness);
+			HAL_Delay(1);
+		}
+	}
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_LSE | RCC_OSCILLATORTYPE_HSI;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.LSEState = RCC_LSE_ON;
+	osc_init.HSIState = RCC_HSI_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+
+	GPIO_InitTypeDef ledgpio;
+	ledgpio.Pin = GPIO_PIN_5;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void TIM2_Init(void) {
+	TIM_OC_InitTypeDef tim2PWM_Config;
+	memset(&tim2PWM_Config, 0, sizeof(tim2PWM_Config));
+
+	htim2.Instance = TIM2;
+	htim2.Init.Period = 10000-1; 				//32-bit timer (TIM2)
+	htim2.Init.Prescaler = 4999;  				//SYSCLK = 50MHZ, so prescaler of 4999 makes the timer CNT_CLK 10kHz
+	if(HAL_TIM_PWM_Init(&htim2) != HAL_OK) { 	//Initializes timer PWM time base with period 1 second.
+		Error_handler();
+	}
+
+	//Channel 1 - PWM 25% duty cycle
+	tim2PWM_Config.OCMode = TIM_OCMODE_PWM1;
+	tim2PWM_Config.OCPolarity = TIM_OCPOLARITY_HIGH; //CC1P bit field of TIM2_CCER register. signal path: oc1ref -> (here) mux selection -> OE Circuit -> OC1
+													 //polarity high -> ON (25%) then OFF (75%).   polarity low -> OFF (25%) then ON (75%)
+	tim2PWM_Config.Pulse = 0;
+	if(HAL_TIM_PWM_ConfigChannel(&htim2, &tim2PWM_Config, TIM_CHANNEL_1) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										UART2_Example
+*********************************************************************************************************
+#include <string.h>
+#include "main.h"
+
+void SystemClockConfig(void);
+void UART2_Init(void);
+void Error_handler(void);
+
+uint8_t convert_to_upper(uint8_t data);
+
+UART_HandleTypeDef huart2;
+
+char *user_data = "The application is running\r\n";
+
+int main(void) {
+
+	HAL_Init();
+	SystemClockConfig();
+	UART2_Init();
+
+	uint16_t len_of_data = strlen(user_data);
+
+	HAL_UART_Transmit(&huart2, (uint8_t*)user_data, len_of_data, HAL_MAX_DELAY);
+
+	uint8_t rx_data;
+	uint8_t rx_buffer[100];
+	uint32_t count = 0;
+
+	while(1) {
+		HAL_UART_Receive(&huart2, &rx_data, 1, HAL_MAX_DELAY);
+		if(rx_data == '\r') {
+			break;
+		} else {
+			rx_buffer[count++] = convert_to_upper(rx_data);
+		}
+
+	}
+
+	HAL_UART_Transmit(&huart2, rx_buffer, count, HAL_MAX_DELAY);
+	while(1);
+
+	return 0;
+}
+
+void SystemClockConfig(void) {
+
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+uint8_t convert_to_upper(uint8_t data) {
+
+	if((data >= 'a') && (data <= 'z')) {
+		data = data - ('a' - 'A'); //data = data - 32;
+	}
+
+	return data;
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+										UART2_Example_IT
+*********************************************************************************************************
+#include <string.h>
+#include "main.h"
+
+void SystemClockConfig(void);
+void UART2_Init(void);
+void Error_handler(void);
+
+#define TRUE 	1
+#define	FALSE 	0
+
+UART_HandleTypeDef huart2;
+
+uint8_t rx_buffer[100];
+uint8_t rx_data;
+uint32_t count = 0;
+uint8_t rxcmplt = FALSE;
+
+
+char *user_data = "The application is running\r\n";
+
+int main(void) {
+
+	HAL_Init();
+	SystemClockConfig();
+	UART2_Init();
+
+	uint16_t len_of_data = strlen(user_data);
+
+	HAL_UART_Transmit(&huart2, (uint8_t*)user_data, len_of_data, HAL_MAX_DELAY);
+
+	while(rxcmplt != TRUE) {
+		HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+	}
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClockConfig(void) {
+
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 115200;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX_RX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+//Callback function invoked when the desired number bytes are received by the uart peripheral
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+
+	if(huart->Instance == USART2) {
+		if(rx_data == '\r') {
+			rxcmplt = TRUE;
+			rx_buffer[count++] = '\r';
+			HAL_UART_Transmit(huart, rx_buffer, count, HAL_MAX_DELAY);
+
+		} else {
+			rx_buffer[count++] = rx_data;
+		}
+	}
+}
+
+void Error_handler(void) {
+	while(1);
+}
+
+*********************************************************************************************************
+											WFE_button
+*********************************************************************************************************
+//////////////////////////// data.c ////////////////////////////
+#include "main.h"
+
+char some_data[] = "Testing WFE Instruction\r\n";
+
+//////////////////////////// main.c ////////////////////////////
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void GPIO_AnalogConfig(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+
+extern uint8_t some_data[];
+
+
+
+int main(void) {
+
+	char msg[50];
+
+	HAL_Init(); //Systick interrupt initialized here
+
+	//SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+
+	GPIO_AnalogConfig();
+
+	while(1) {
+
+		if(HAL_UART_Transmit(&huart2, (uint8_t*)some_data, (uint16_t)strlen((char*)some_data), HAL_MAX_DELAY) != HAL_OK) {
+			Error_handler();
+		}
+
+		memset(msg, 0, sizeof(msg));
+		sprintf(msg, "Going to Sleep!\r\n");
+		HAL_UART_Transmit(&huart2, (uint8_t*)some_data, (uint16_t)strlen((char*)msg), HAL_MAX_DELAY);
+
+		//Systick is not required. Disabling Systick interrupt before Sleep
+		HAL_SuspendTick();
+
+		//Going to Sleep
+		__WFE();
+
+		//After waking up, enable Systick interrupt
+		HAL_ResumeTick();
+
+		memset(msg, 0, sizeof(msg));
+		sprintf(msg, "Woke up!\r\n");
+		HAL_UART_Transmit(&huart2, (uint8_t*)some_data, (uint16_t)strlen((char*)msg), HAL_MAX_DELAY);
+	}
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_AnalogConfig(void) {
+
+	GPIO_InitTypeDef GpioA, GpioC;
+
+	uint32_t gpio_pins = 	GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | \
+							GPIO_PIN_5| GPIO_PIN_6 | GPIO_PIN_7  | \
+							GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | \
+							GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_13 | \
+							GPIO_PIN_14 | GPIO_PIN_15;
+	GpioA.Pin = gpio_pins;
+	GpioA.Mode = GPIO_MODE_ANALOG;
+	HAL_GPIO_Init(GPIOA, &GpioA);
+
+	gpio_pins = 			GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | \
+							GPIO_PIN_3| GPIO_PIN_4 | GPIO_PIN_5  | \
+							GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_8 | \
+							GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11 | \
+							GPIO_PIN_12 | GPIO_PIN_14 | GPIO_PIN_15;
+
+	GpioC.Pin = gpio_pins;
+	GpioC.Mode = GPIO_MODE_ANALOG;
+	HAL_GPIO_Init(GPIOC, &GpioC);
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_SLEEP_DISABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+#if 0
+	ledgpio.Pin = GPIO_PIN_5 | GPIO_PIN_12;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+#endif
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_EVT_FALLING; //event falling-edge
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+#if 0
+	//Do not need interrupt priority settings for events, as all that occurs is the event register will be set
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+#endif
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 921600;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	//The UART Transmit in the while(1) loop occurs instead due to using events instead of interrupts
+	if(HAL_UART_Transmit(&huart2, (uint8_t*)some_data, (uint16_t)strlen((char*)some_data), HAL_MAX_DELAY) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+
+}
+
+void Error_handler(void) {
+
+	while(1);
+}
+
+*********************************************************************************************************
+											WFI_button
+*********************************************************************************************************
+//////////////////////////// data.c ////////////////////////////
+#include "main.h"
+
+char some_data[] = "Testing WFI Instruction\r\n";;
+
+//////////////////////////// main.c ////////////////////////////
+#include "main.h"
+#include <stdio.h>
+#include <string.h>
+
+void SystemClock_Config_HSE(uint8_t clock_freq);
+void GPIO_Init(void);
+void UART2_Init(void);
+void GPIO_AnalogConfig(void);
+void Error_handler(void);
+
+UART_HandleTypeDef huart2;
+
+extern uint8_t some_data[];
+
+int main(void) {
+
+	HAL_Init();
+
+	//SystemClock_Config_HSE(SYS_CLOCK_FREQ_50MHZ);
+
+	GPIO_Init();
+	UART2_Init();
+
+	GPIO_AnalogConfig();
+
+	while(1);
+
+	return 0;
+}
+
+void SystemClock_Config_HSE(uint8_t clock_freq) {
+
+	RCC_OscInitTypeDef osc_init;
+	RCC_ClkInitTypeDef clk_init;
+	uint8_t flash_latency = 0;
+
+	//Using HSE to derive PLL
+	//Activate LSE Crystal Oscillator on Nucleo Board
+	osc_init.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	osc_init.HSEState = RCC_HSE_ON;
+	osc_init.PLL.PLLState = RCC_PLL_ON;
+	osc_init.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+
+	switch(clock_freq) {
+		case SYS_CLOCK_FREQ_50MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 100;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 1;
+			break;
+		}
+		case SYS_CLOCK_FREQ_84MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 168;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV2;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 2;
+			break;
+		}
+		case SYS_CLOCK_FREQ_120MHZ: {
+			osc_init.PLL.PLLM = 16;
+			osc_init.PLL.PLLN = 240;
+			osc_init.PLL.PLLP = RCC_PLLP_DIV2;
+			osc_init.PLL.PLLQ = 2;
+			osc_init.PLL.PLLR = 2;
+
+			clk_init.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | \
+					 	 	 	  RCC_CLOCKTYPE_PCLK1  | RCC_CLOCKTYPE_PCLK2);
+			clk_init.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+			clk_init.AHBCLKDivider = RCC_SYSCLK_DIV1;
+			clk_init.APB1CLKDivider = RCC_HCLK_DIV4;
+			clk_init.APB2CLKDivider = RCC_HCLK_DIV2;
+			flash_latency = 3;
+			break;
+		}
+		default:
+			return;
+	}
+
+	if(HAL_RCC_OscConfig(&osc_init) != HAL_OK) {
+		Error_handler();
+	}
+
+	if(HAL_RCC_ClockConfig(&clk_init, flash_latency) != HAL_OK) {
+		Error_handler();
+	}
+
+	//Configure the SYSTICK timer interrupt frequency for every 1ms
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+	//Configure SYSTICK
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	//SYSTICK IRQn interrupt configuration
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+
+}
+
+void GPIO_AnalogConfig(void) {
+
+	GPIO_InitTypeDef GpioA, GpioC;
+
+	uint32_t gpio_pins = 	GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | \
+							GPIO_PIN_5| GPIO_PIN_6 | GPIO_PIN_7  | \
+							GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | \
+							GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_13 | \
+							GPIO_PIN_14 | GPIO_PIN_15;
+
+
+	GpioA.Pin = gpio_pins;
+	GpioA.Mode = GPIO_MODE_ANALOG;
+	HAL_GPIO_Init(GPIOA, &GpioA);
+
+	gpio_pins = 			GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | \
+							GPIO_PIN_3| GPIO_PIN_4 | GPIO_PIN_5  | \
+							GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_8 | \
+							GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11 | \
+							GPIO_PIN_12 | GPIO_PIN_14 | GPIO_PIN_15;
+
+	GpioC.Pin = gpio_pins;
+	GpioC.Mode = GPIO_MODE_ANALOG;
+	HAL_GPIO_Init(GPIOC, &GpioC);
+}
+
+void GPIO_Init(void) {
+
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_SLEEP_DISABLE();
+
+	GPIO_InitTypeDef ledgpio, buttongpio;
+#if 0
+	ledgpio.Pin = GPIO_PIN_5 | GPIO_PIN_12;
+	ledgpio.Mode = GPIO_MODE_OUTPUT_PP;
+	ledgpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &ledgpio);
+#endif
+
+	buttongpio.Pin = GPIO_PIN_13;
+	buttongpio.Mode = GPIO_MODE_IT_FALLING; //interrupt falling-edge
+	buttongpio.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &buttongpio);
+
+	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 15, 0);
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+}
+
+void UART2_Init(void) {
+
+	huart2.Instance = USART2; //linking
+	huart2.Init.BaudRate = 230400;
+	huart2.Init.WordLength = UART_WORDLENGTH_8B;
+	huart2.Init.StopBits = UART_STOPBITS_1;
+	huart2.Init.Parity = UART_PARITY_NONE;
+	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart2.Init.Mode = UART_MODE_TX;
+
+	if(HAL_UART_Init(&huart2) != HAL_OK) {
+
+		//There is a problem
+		Error_handler();
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	if(HAL_UART_Transmit(&huart2, (uint8_t*)some_data, (uint16_t)strlen((char*)some_data), HAL_MAX_DELAY) != HAL_OK) {
+		Error_handler();
+	}
+}
+
+void Error_handler(void) {
+
+	while(1);
+}

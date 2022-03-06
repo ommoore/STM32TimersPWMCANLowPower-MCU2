@@ -27,27 +27,27 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   ALLOC
  11 .ARM.attributes 00000030  00000000  00000000  000201dc  2**0
                   CONTENTS, READONLY
- 12 .debug_info   0000b3cf  00000000  00000000  0002020c  2**0
+ 12 .debug_info   0000b3cd  00000000  00000000  0002020c  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 13 .debug_abbrev 00001823  00000000  00000000  0002b5db  2**0
+ 13 .debug_abbrev 000017f6  00000000  00000000  0002b5d9  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 14 .debug_aranges 000007d8  00000000  00000000  0002ce00  2**3
+ 14 .debug_aranges 000007d8  00000000  00000000  0002cdd0  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 15 .debug_ranges 00000750  00000000  00000000  0002d5d8  2**3
+ 15 .debug_ranges 00000750  00000000  00000000  0002d5a8  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 16 .debug_macro  0002139e  00000000  00000000  0002dd28  2**0
+ 16 .debug_macro  0002139e  00000000  00000000  0002dcf8  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .debug_line   00009d8e  00000000  00000000  0004f0c6  2**0
+ 17 .debug_line   00009d8e  00000000  00000000  0004f096  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    000cad4f  00000000  00000000  00058e54  2**0
+ 18 .debug_str    000cacaa  00000000  00000000  00058e24  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000053  00000000  00000000  00123ba3  2**0
+ 19 .comment      00000053  00000000  00000000  00123ace  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  0000329c  00000000  00000000  00123bf8  2**2
+ 20 .debug_frame  0000329c  00000000  00000000  00123b24  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .stab         000000cc  00000000  00000000  00126e94  2**2
+ 21 .stab         000000cc  00000000  00000000  00126dc0  2**2
                   CONTENTS, READONLY, DEBUGGING
- 22 .stabstr      000001b9  00000000  00000000  00126f60  2**0
+ 22 .stabstr      000001b9  00000000  00000000  00126e8c  2**0
                   CONTENTS, READONLY, DEBUGGING
 
 Disassembly of section .text:
@@ -1290,7 +1290,7 @@ void CAN1_SCE_IRQHandler(void) {
  8000f3c:	20000248 	.word	0x20000248
 
 08000f40 <main>:
-void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan);
+void Error_handler(void);
 
 UART_HandleTypeDef huart2;
 CAN_HandleTypeDef hcan1;

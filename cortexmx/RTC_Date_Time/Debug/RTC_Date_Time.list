@@ -1346,6 +1346,7 @@ int main(void) {
  8000f9c:	f44f 7080 	mov.w	r0, #256	; 0x100
  8000fa0:	f000 fe0c 	bl	8001bbc <HAL_PWR_EnableWakeUpPin>
 
+	//In Standby Mode, the RTC will not be affected!
 	printmsg("Went to STANDBY mode\r\n");
  8000fa4:	4805      	ldr	r0, [pc, #20]	; (8000fbc <main+0x70>)
  8000fa6:	f7ff ffab 	bl	8000f00 <printmsg>

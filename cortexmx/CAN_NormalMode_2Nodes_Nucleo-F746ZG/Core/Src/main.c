@@ -20,12 +20,6 @@ void Send_response(uint32_t StdId);
 void LED_Manage_Output(uint8_t led_no);
 void Error_handler(void);
 
-void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan);
-void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan);
-void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan);
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
-void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan);
-
 UART_HandleTypeDef huart2;
 CAN_HandleTypeDef hcan1;
 TIM_HandleTypeDef htim6;
